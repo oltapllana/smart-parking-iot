@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 import json
 import threading
 import time
+from cassandra_client import CassandraClient
 
 from parking_simulator import ParkingSimulator
 from parking_ml_service import ParkingMLService
@@ -25,11 +26,16 @@ ml_service = None
 alert_engine = None
 historical_data = []
 MAX_HISTORY = 1000
+cassandra_client = None
 
 
 def initialize_services():
     """Initialize all parking services"""
     global parking_simulator, ml_service, alert_engine
+    global cassandra_client
+
+    cassandra_client = CassandraClient()
+    cassandra_client.connect()
     
     parking_simulator = ParkingSimulator('LOT-MAIN-001')
     parking_simulator.start_simulation(interval=0.5)
@@ -288,6 +294,32 @@ def get_zones_info():
         'zones': zones,
         'timestamp': datetime.now().isoformat()
     })
+
+@app.route('/api/parking/events', methods=['GET'])
+def get_cassandra_events():
+    """Get latest parking events from Cassandra"""
+    if not cassandra_client:
+        return jsonify({'error': 'Cassandra not initialized'}), 500
+
+    lot_id = request.args.get('lot_id', 'LOT-001')
+    limit = request.args.get('limit', 20, type=int)
+
+    try:
+        events = cassandra_client.get_latest_events(lot_id=lot_id, limit=limit)
+
+        return jsonify({
+            'source': 'cassandra',
+            'lot_id': lot_id,
+            'count': len(events),
+            'events': events,
+            'timestamp': datetime.now().isoformat()
+        })
+
+    except Exception as e:
+        return jsonify({
+            'error': 'Failed to fetch events from Cassandra',
+            'details': str(e)
+        }), 500
 
 
 @app.route('/', methods=['GET'])

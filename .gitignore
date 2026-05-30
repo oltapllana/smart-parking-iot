@@ -10,7 +10,7 @@ build/
 # Environment
 .env
 .env.local
-venv/
+.venv/
 env/
 
 # IDE

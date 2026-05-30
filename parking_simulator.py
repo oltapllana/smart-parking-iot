@@ -12,6 +12,11 @@ from datetime import datetime
 from collections import defaultdict
 import sqlite3
 
+try:
+    from kafka_producer import ParkingKafkaProducer
+except ImportError:
+    ParkingKafkaProducer = None
+
 class ParkingSpot:
     def __init__(self, spot_id, zone, level):
         self.spot_id = spot_id
@@ -50,7 +55,7 @@ class ParkingSpot:
 
 
 class ParkingLot:
-    def __init__(self, lot_id, zones=4, levels=3, spots_per_level=30):
+    def __init__(self, lot_id, zones=4, levels=3, spots_per_level=30, kafka_enabled=False):
         self.lot_id = lot_id
         self.zones = zones
         self.levels = levels
@@ -59,60 +64,103 @@ class ParkingLot:
         self.spots = {}
         self.historical_occupancy = defaultdict(list)
         self.entry_exit_log = []
+
+        self.kafka_enabled = kafka_enabled
+        self.kafka_producer = None
+
+        if self.kafka_enabled and ParkingKafkaProducer:
+            try:
+                self.kafka_producer = ParkingKafkaProducer()
+                print("✅ Kafka producer connected")
+            except Exception as e:
+                print(f"⚠️ Kafka producer not connected: {e}")
+
         self._initialize_spots()
-        
+
     def _initialize_spots(self):
         """Initialize all parking spots"""
         spot_id = 0
         for zone in range(self.zones):
             for level in range(self.levels):
                 for spot in range(self.spots_per_level):
-                    self.spots[spot_id] = ParkingSpot(spot_id, f"Zone-{zone+1}", f"Level-{level+1}")
+                    self.spots[spot_id] = ParkingSpot(
+                        spot_id,
+                        f"Zone-{zone + 1}",
+                        f"Level-{level + 1}"
+                    )
                     spot_id += 1
-                    
+
+    def send_kafka_event(self, event):
+        """Send parking event to Kafka if Kafka is enabled"""
+        if self.kafka_producer:
+            try:
+                self.kafka_producer.send_event(event)
+            except Exception as e:
+                print(f"⚠️ Failed to send Kafka event: {e}")
+
     def get_random_spot(self):
         """Get a random available spot"""
         available = [s for s in self.spots.values() if not s.occupied]
         if available:
             return random.choice(available)
         return None
-    
+
     def get_spots_by_zone(self, zone):
         """Get all spots in a zone"""
         return [s for s in self.spots.values() if s.zone == zone]
-    
+
     def occupy_spot(self, spot_id, vehicle_type='car'):
         """Occupy a parking spot"""
         if spot_id in self.spots and not self.spots[spot_id].occupied:
             self.spots[spot_id].occupy(vehicle_type)
-            self.entry_exit_log.append({
+            spot = self.spots[spot_id]
+
+            event = {
+                'lot_id': self.lot_id,
                 'timestamp': datetime.now().isoformat(),
                 'spot_id': spot_id,
+                'zone': spot.zone,
+                'level': spot.level,
                 'event': 'entry',
+                'occupied': True,
                 'vehicle_type': vehicle_type
-            })
+            }
+
+            self.entry_exit_log.append(event)
+            self.send_kafka_event(event)
+
             return True
         return False
-    
+
     def vacate_spot(self, spot_id):
         """Vacate a parking spot"""
         if spot_id in self.spots and self.spots[spot_id].occupied:
             occupancy_time = self.spots[spot_id].occupancy_time
-            self.spots[spot_id].vacate()
-            self.entry_exit_log.append({
+            spot = self.spots[spot_id]
+
+            event = {
+                'lot_id': self.lot_id,
                 'timestamp': datetime.now().isoformat(),
                 'spot_id': spot_id,
+                'zone': spot.zone,
+                'level': spot.level,
                 'event': 'exit',
+                'occupied': False,
                 'occupancy_duration': occupancy_time
-            })
+            }
+
+            self.spots[spot_id].vacate()
+            self.entry_exit_log.append(event)
+            self.send_kafka_event(event)
+
             return True
         return False
-    
+
     def get_occupancy_rate(self):
         """Get current occupancy rate (0-100%)"""
         occupied = sum(1 for s in self.spots.values() if s.occupied)
         return (occupied / self.total_spots) * 100
-    
+
     def get_zone_occupancy(self, zone):
         """Get occupancy rate for a specific zone"""
         zone_spots = self.get_spots_by_zone(zone)
@@ -120,7 +168,7 @@ class ParkingLot:
             return 0
         occupied = sum(1 for s in zone_spots if s.occupied)
         return (occupied / len(zone_spots)) * 100
-    
+
     def get_statistics(self):
         """Get parking lot statistics"""
         occupied_count = sum(1 for s in self.spots.values() if s.occupied)
@@ -136,36 +184,36 @@ class ParkingLot:
                     'occupied': sum(1 for s in self.get_spots_by_zone(zone) if s.occupied),
                     'available': sum(1 for s in self.get_spots_by_zone(zone) if not s.occupied)
                 }
-                for zone in [f"Zone-{i+1}" for i in range(self.zones)]
+                for zone in [f"Zone-{i + 1}" for i in range(self.zones)]
             },
             'timestamp': datetime.now().isoformat()
         }
-    
+
     def simulate_traffic(self):
         """Simulate parking lot traffic patterns"""
-        # 5% chance of new vehicle arriving
-        if random.random() < 0.05:
+
+        # TEST MODE: 90% chance of new vehicle arriving
+        if random.random() < 0.9:
             spot = self.get_random_spot()
             if spot:
                 vehicle_type = random.choice(['car', 'motorcycle', 'truck'])
                 self.occupy_spot(spot.spot_id, vehicle_type)
-        
-        # Remove vehicles after random duration
+
         occupied_spots = [s for s in self.spots.values() if s.occupied]
         for spot in occupied_spots:
             spot.occupancy_time += 1
-            # Average stay time: 45 minutes (2700 seconds), simulated in iterations
-            if spot.occupancy_time > random.randint(30, 90):
+
+            # TEST MODE: vehicles leave faster
+            if spot.occupancy_time > random.randint(3, 8):
                 self.vacate_spot(spot.spot_id)
-    
+        
     def get_all_spots_status(self):
         """Get status of all parking spots"""
         return [s.get_status() for s in self.spots.values()]
 
-
 class ParkingSimulator:
-    def __init__(self, lot_id='PARKING-001'):
-        self.parking_lot = ParkingLot(lot_id)
+    def __init__(self, lot_id='PARKING-001', kafka_enabled=False):
+        self.parking_lot = ParkingLot(lot_id, kafka_enabled=kafka_enabled)
         self.running = False
         self.simulation_thread = None
         self.iteration_count = 0
@@ -210,7 +258,7 @@ class ParkingSimulator:
 
 # Example usage
 if __name__ == '__main__':
-    simulator = ParkingSimulator('LOT-001')
+    simulator = ParkingSimulator('LOT-001', kafka_enabled=True)
     simulator.start_simulation(interval=0.5)
     
     try:

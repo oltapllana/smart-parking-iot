@@ -8,6 +8,7 @@ import OccupancyChart from './components/OccupancyChart';
 import AlertPanel from './components/AlertPanel';
 import PredictionPanel from './components/PredictionPanel';
 import TabNavigation from './components/TabNavigation';
+import EventsPanel from './components/EventsPanel';
 
 const AppContainer = styled.div`
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -77,6 +78,7 @@ function App() {
   const [parkingData, setParkingData] = useState(null);
   const [alerts, setAlerts] = useState([]);
   const [predictions, setPredictions] = useState(null);
+  const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
@@ -91,17 +93,19 @@ function App() {
   const fetchAllData = async () => {
     try {
       setError(null);
-      const [statusRes, alertsRes, predictRes, historyRes] = await Promise.all([
+      const [statusRes, alertsRes, predictRes, historyRes, eventsRes] = await Promise.all([
         axios.get('/api/parking/status'),
         axios.get('/api/parking/alerts'),
         axios.get('/api/parking/availability'),
-        axios.get('/api/parking/history?limit=50')
+        axios.get('/api/parking/history?limit=50'),
+        axios.get('/api/parking/events?limit=50')
       ]);
 
       setParkingData(statusRes.data);
       setAlerts(alertsRes.data.alerts || []);
       setPredictions(predictRes.data);
       setOccupancyHistory(historyRes.data.history || []);
+      setEvents(eventsRes.data.events || eventsRes.data || []);
       setLoading(false);
     } catch (err) {
       setError('Failed to fetch parking data. Please ensure the API server is running.');
@@ -164,6 +168,13 @@ function App() {
       {activeTab === 'chart' && (
         <Card>
           <OccupancyChart history={occupancyHistory} />
+        </Card>
+      )}
+
+      {activeTab === 'events' && (
+        <Card>
+          <h3>📋 Latest Events</h3>
+          <EventsPanel events={events} />
         </Card>
       )}
     </AppContainer>
