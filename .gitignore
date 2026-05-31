@@ -56,3 +56,5 @@ data/
 # Cache
 .cache/
 .pytest_cache/
+
+*.jsonl

@@ -135,7 +135,9 @@ const AlertPanel = ({ alerts }) => {
     <Container>
       <h3>🚨 Active Alerts ({alerts.length})</h3>
       <AlertList>
-        {alerts.map(alert => (
+       {[...alerts]
+        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+        .map(alert => (
           <AlertItem key={alert.id} severity={alert.severity}>
             <AlertIcon severity={alert.severity}>
               {getIcon(alert.severity)}
