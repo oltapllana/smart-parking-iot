@@ -10,11 +10,19 @@ from datetime import datetime, timedelta
 import json
 import threading
 import time
-from cassandra_client import CassandraClient
 
 from parking_simulator import ParkingSimulator
 from parking_ml_service import ParkingMLService
 from parking_alert_engine import ParkingAlertEngine
+
+# Use local pipeline (Kafka → Spark → Cassandra simulation)
+from local_pipeline import get_components
+
+try:
+    from cassandra_client import CassandraClient
+    HAS_CASSANDRA = True
+except:
+    HAS_CASSANDRA = False
 
 
 app = Flask(__name__)
@@ -26,16 +34,22 @@ ml_service = None
 alert_engine = None
 historical_data = []
 MAX_HISTORY = 1000
-cassandra_client = None
+kafka_queue = None
+cassandra_db = None
+spark_streamer = None
 
 
 def initialize_services():
     """Initialize all parking services"""
     global parking_simulator, ml_service, alert_engine
-    global cassandra_client
+    global kafka_queue, cassandra_db, spark_streamer
 
-    cassandra_client = CassandraClient()
-    cassandra_client.connect()
+    # Initialize local pipeline (Kafka → Spark → Cassandra)
+    print("🔥 Initializing Local IoT Pipeline...")
+    kafka_queue, cassandra_db, spark_streamer = get_components()
+    print("   ✅ Kafka simulator ready")
+    print("   ✅ Spark streaming ready")
+    print("   ✅ Cassandra database ready")
     
     parking_simulator = ParkingSimulator('LOT-MAIN-001')
     parking_simulator.start_simulation(interval=0.5)
@@ -60,6 +74,21 @@ def collect_data():
                 # Keep history under MAX_HISTORY
                 if len(historical_data) > MAX_HISTORY:
                     historical_data.pop(0)
+                
+                # Send to Kafka queue
+                if kafka_queue:
+                    event = {
+                        'lot_id': data.get('lot_id'),
+                        'timestamp': datetime.now().isoformat(),
+                        'spot_id': 0,
+                        'zone': 'ALL',
+                        'level': 'ALL',
+                        'event': 'status_update',
+                        'occupied': data.get('occupied_spots', 0),
+                        'vehicle_type': 'mixed',
+                        'occupancy_duration': 0
+                    }
+                    kafka_queue.produce('parking-events', event, key=data.get('lot_id'))
                 
                 # Check for alerts
                 alert_engine.check_alerts(data)
@@ -298,17 +327,17 @@ def get_zones_info():
 @app.route('/api/parking/events', methods=['GET'])
 def get_cassandra_events():
     """Get latest parking events from Cassandra"""
-    if not cassandra_client:
+    if not cassandra_db:
         return jsonify({'error': 'Cassandra not initialized'}), 500
 
     lot_id = request.args.get('lot_id', 'LOT-001')
     limit = request.args.get('limit', 20, type=int)
 
     try:
-        events = cassandra_client.get_latest_events(lot_id=lot_id, limit=limit)
+        events = cassandra_db.query(lot_id=lot_id, limit=limit)
 
         return jsonify({
-            'source': 'cassandra',
+            'source': 'local_cassandra',
             'lot_id': lot_id,
             'count': len(events),
             'events': events,
