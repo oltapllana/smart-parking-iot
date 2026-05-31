@@ -10,6 +10,7 @@ import PredictionPanel from './components/PredictionPanel';
 import TabNavigation from './components/TabNavigation';
 import EventsPanel from './components/EventsPanel';
 import SystemStatus from './components/SystemStatus';
+import PerformancePanel from './components/PerformancePanel';
 
 const AppContainer = styled.div`
   background: #0f172a;
@@ -189,6 +190,8 @@ function App() {
   const [activeTab, setActiveTab] = useState('overview');
   const [occupancyHistory, setOccupancyHistory] = useState([]);
   const [systemMetrics, setSystemMetrics] = useState({});
+  const [performance, setPerformance] = useState(null);
+  const [windows, setWindows] = useState([]);
 
   useEffect(() => {
     fetchAllData();
@@ -199,12 +202,14 @@ function App() {
   const fetchAllData = async () => {
     try {
       setError(null);
-      const [statusRes, alertsRes, predictRes, historyRes, eventsRes] = await Promise.all([
+      const [statusRes, alertsRes, predictRes, historyRes, eventsRes, perfRes, windowsRes] = await Promise.all([
         axios.get('/api/parking/status'),
         axios.get('/api/parking/alerts'),
         axios.get('/api/parking/availability'),
         axios.get('/api/parking/history?limit=50'),
-        axios.get('/api/parking/events?limit=50')
+        axios.get('/api/parking/events?limit=50'),
+        axios.get('/api/parking/performance'),
+        axios.get('/api/parking/windows?limit=10')
       ]);
 
       setParkingData(statusRes.data);
@@ -212,20 +217,21 @@ function App() {
       setPredictions(predictRes.data);
       setOccupancyHistory(historyRes.data.history || []);
       setEvents(eventsRes.data.events || eventsRes.data || []);
-      
-      // Compute system metrics from available data
-      const kafkaMessages = (eventsRes.data?.events?.length || 0) + 5;
-      const sparkProcessed = (eventsRes.data?.events?.length || 0);
-      const cassandraEvents = (eventsRes.data?.count || eventsRes.data?.events?.length || 0);
-      
+      setPerformance(perfRes.data);
+      setWindows(windowsRes.data.windows || []);
+
+      // Real pipeline metrics from the performance monitor
+      const perf = perfRes.data || {};
       setSystemMetrics({
-        kafka_messages: kafkaMessages,
-        spark_processed: sparkProcessed,
-        cassandra_events: cassandraEvents,
-        api_health: 100,
-        processing_latency: 660
+        kafka_messages: perf.counters?.kafka_messages || 0,
+        spark_processed: perf.counters?.spark_processed || 0,
+        cassandra_events: perf.counters?.cassandra_events || 0,
+        api_health: perf.health?.data_quality_pct || 100,
+        processing_latency: perf.latency?.end_to_end_ms || 0,
+        throughput: perf.throughput?.spark_eps || 0,
+        latency: perf.latency || {},
       });
-      
+
       setLoading(false);
     } catch (err) {
       setError('Failed to fetch parking data. Please ensure the API server is running.');
@@ -334,6 +340,12 @@ function App() {
         <FullWidthCard>
           <h3 style={{ marginTop: 0 }}>📋 Event Log</h3>
           <EventsPanel events={events} />
+        </FullWidthCard>
+      )}
+
+      {activeTab === 'performance' && (
+        <FullWidthCard>
+          <PerformancePanel performance={performance} windows={windows} />
         </FullWidthCard>
       )}
 

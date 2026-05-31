@@ -2,6 +2,14 @@
 
 A comprehensive real-time IoT system for smart parking lot management with **ML-powered predictions**, **real-time monitoring**, and an **interactive React dashboard**.
 
+> **Pipeline:** Sensors → **Apache Kafka** → **Apache Spark Streaming** (sliding-window aggregations) → **Apache Cassandra** → Flask API → React Dashboard.
+>
+> **Two run modes:**
+> - **Local pipeline** (default, in `local_pipeline.py`) — Kafka/Spark/Cassandra simulated in-process. No Docker needed; ideal for a live demo.
+> - **Real Docker pipeline** — actual Apache Kafka + Spark + Cassandra via `docker-compose.yml`. See **[DOCKER_PIPELINE.md](DOCKER_PIPELINE.md)**.
+>
+> **Advanced components:** 🤖 trained ML models (`parking_ml_service.py`), 🚨 alarm system (`parking_alert_engine.py`), 📊 performance analysis (`performance_monitor.py` + `benchmark.py`). Full write-up in **[REPORT.md](REPORT.md)**.
+
 ## 🏗️ Architecture
 
 ```
@@ -165,6 +173,13 @@ The dashboard will open automatically at http://localhost:3000
 - `GET /api/parking/alerts` - Current active alerts
 - `GET /api/parking/statistics` - Parking statistics
 - `GET /api/parking/history?limit=100` - Occupancy history
+
+### Advanced Components
+- `GET /api/parking/performance` - Live pipeline throughput & latency metrics
+- `GET /api/parking/windows?limit=10` - Spark sliding-window aggregations
+- `GET /api/parking/ml-info` - Trained ML model metadata & feature importances
+- `POST /api/parking/retrain` - Retrain the ML models on fresh synthetic data
+- `GET /api/parking/events?limit=20` - Latest events stored in Cassandra
 
 ## 🎮 Dashboard Guide
 

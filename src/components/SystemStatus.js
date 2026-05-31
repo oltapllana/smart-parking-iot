@@ -244,12 +244,12 @@ const SystemStatus = ({ systemMetrics }) => {
       </MetricsTable>
 
       <div style={{ marginTop: '25px', padding: '15px', background: 'rgba(59, 130, 246, 0.1)', borderRadius: '8px', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
-        <h4 style={{ margin: '0 0 10px 0', color: '#60a5fa' }}>📊 End-to-End Performance</h4>
+        <h4 style={{ margin: '0 0 10px 0', color: '#60a5fa' }}>📊 End-to-End Performance (live)</h4>
         <div style={{ fontSize: '0.95em', opacity: 0.8 }}>
-          <p style={{ margin: '5px 0' }}>• <strong>Total Latency:</strong> ~660ms (Kafka + Spark + Cassandra + API)</p>
-          <p style={{ margin: '5px 0' }}>• <strong>Throughput:</strong> 2.4 events/second (300% under capacity)</p>
-          <p style={{ margin: '5px 0' }}>• <strong>Data Quality:</strong> 95% (validation + processing score)</p>
-          <p style={{ margin: '5px 0' }}>• <strong>System Uptime:</strong> 100% (no errors)</p>
+          <p style={{ margin: '5px 0' }}>• <strong>End-to-End Latency:</strong> ~{Math.round(metrics.processing_latency)}ms (Kafka → Spark → Cassandra)</p>
+          <p style={{ margin: '5px 0' }}>• <strong>Throughput:</strong> {metrics.throughput ?? 0} events/second</p>
+          <p style={{ margin: '5px 0' }}>• <strong>Data Quality:</strong> {metrics.api_health}% (validation + processing score)</p>
+          <p style={{ margin: '5px 0' }}>• <strong>Events Stored:</strong> {metrics.cassandra_events} in Cassandra</p>
         </div>
       </div>
     </div>

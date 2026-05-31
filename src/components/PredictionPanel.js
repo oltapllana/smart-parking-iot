@@ -99,6 +99,15 @@ const PredictionPanel = ({ prediction }) => {
         <strong>💡 Recommendation:</strong>
         <p>{prediction.recommendation}</p>
       </RecommendationBox>
+
+      {prediction.model && (
+        <div style={{ marginTop: '12px', fontSize: '0.8em', opacity: 0.6 }}>
+          🤖 Model: <strong>{prediction.model}</strong>
+          {prediction.class_probabilities && (
+            <span> · top class {(prediction.confidence * 100).toFixed(0)}% confidence</span>
+          )}
+        </div>
+      )}
     </Container>
   );
 };

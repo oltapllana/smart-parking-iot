@@ -11,11 +11,24 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from collections import defaultdict
+from collections import defaultdict, deque
+
 import logging
+
+from performance_monitor import get_monitor
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def _parse_ts(ts):
+    """Parse an ISO timestamp string to epoch seconds (best effort)."""
+    if not ts:
+        return time.time()
+    try:
+        return datetime.fromisoformat(ts).timestamp()
+    except Exception:
+        return time.time()
 
 
 class LocalKafka:
@@ -43,7 +56,8 @@ class LocalKafka:
             topic_file = self.data_dir / f"{topic}.jsonl"
             with open(topic_file, 'a') as f:
                 f.write(json.dumps(event) + '\n')
-            
+
+            get_monitor().record_kafka()
             return True
     
     def consume(self, topic, from_offset=0, limit=None):
@@ -157,71 +171,173 @@ class LocalCassandra:
         return count
 
 
+class SlidingWindowAggregator:
+    """
+    Spark-Streaming-style sliding/tumbling window aggregations.
+
+    Groups processed events into fixed-size time windows and computes
+    aggregates per window: event count, entries/exits, occupancy stats and
+    vehicle-type distribution. This mirrors Spark's
+    `groupBy(window(...)).agg(...)` semantics.
+    """
+
+    def __init__(self, window_seconds=60, max_windows=30):
+        self.window_seconds = window_seconds
+        self.windows = {}  # window_start_epoch -> aggregate dict
+        self.max_windows = max_windows
+        self.lock = threading.Lock()
+
+    def add(self, event):
+        ts = _parse_ts(event.get('timestamp'))
+        window_start = int(ts // self.window_seconds) * self.window_seconds
+
+        with self.lock:
+            agg = self.windows.get(window_start)
+            if agg is None:
+                agg = {
+                    'window_start': datetime.fromtimestamp(window_start).isoformat(),
+                    'window_seconds': self.window_seconds,
+                    'event_count': 0,
+                    'entries': 0,
+                    'exits': 0,
+                    'status_updates': 0,
+                    'occupancy_sum': 0,
+                    'occupancy_samples': 0,
+                    'max_occupied': 0,
+                    'vehicle_types': defaultdict(int),
+                }
+                self.windows[window_start] = agg
+
+            agg['event_count'] += 1
+            etype = event.get('event')
+            if etype == 'entry':
+                agg['entries'] += 1
+            elif etype == 'exit':
+                agg['exits'] += 1
+            elif etype == 'status_update':
+                agg['status_updates'] += 1
+                occ = event.get('occupied', 0)
+                if isinstance(occ, (int, float)):
+                    agg['occupancy_sum'] += occ
+                    agg['occupancy_samples'] += 1
+                    agg['max_occupied'] = max(agg['max_occupied'], occ)
+
+            vt = event.get('vehicle_type')
+            if vt and vt != 'mixed':
+                agg['vehicle_types'][vt] += 1
+
+            # Drop windows older than max_windows
+            if len(self.windows) > self.max_windows:
+                oldest = sorted(self.windows.keys())[:-self.max_windows]
+                for k in oldest:
+                    del self.windows[k]
+
+    def get_windows(self, limit=10):
+        with self.lock:
+            keys = sorted(self.windows.keys(), reverse=True)[:limit]
+            result = []
+            for k in keys:
+                agg = self.windows[k]
+                avg_occ = (agg['occupancy_sum'] / agg['occupancy_samples']
+                           if agg['occupancy_samples'] else 0)
+                result.append({
+                    'window_start': agg['window_start'],
+                    'window_seconds': agg['window_seconds'],
+                    'event_count': agg['event_count'],
+                    'entries': agg['entries'],
+                    'exits': agg['exits'],
+                    'status_updates': agg['status_updates'],
+                    'avg_occupied': round(avg_occ, 1),
+                    'max_occupied': agg['max_occupied'],
+                    'vehicle_types': dict(agg['vehicle_types']),
+                })
+            return result
+
+
 class LocalSparkStreaming:
-    """Simulates Spark Streaming processing"""
-    
-    def __init__(self, kafka, cassandra):
+    """Simulates Spark Streaming processing with windowed aggregations."""
+
+    def __init__(self, kafka, cassandra, window_seconds=60):
         self.kafka = kafka
         self.cassandra = cassandra
         self.running = False
         self.processed = 0
         self.lock = threading.Lock()
-        logger.info("✅ Local Spark Streaming initialized")
-    
+        self.aggregator = SlidingWindowAggregator(window_seconds=window_seconds)
+        self.monitor = get_monitor()
+        logger.info("✅ Local Spark Streaming initialized (windowed aggregations on)")
+
     def process_event(self, kafka_event):
-        """Process event (Spark logic)"""
+        """Process + validate + enrich event (Spark transformation logic)."""
         message = kafka_event.get('value', {})
-        
-        # Enrich with processing metadata
+
+        # --- Validation / filtering (Spark .filter) ---
+        valid = bool(message.get('lot_id')) and bool(message.get('timestamp'))
+        data_quality = 0.95 if valid else 0.5
+
         processed = {
             **message,
             'spark_processed': True,
             'processed_timestamp': datetime.now().isoformat(),
-            'data_quality': 0.95
+            'data_quality': data_quality,
+            'valid': valid,
         }
-        
         return processed
-    
-    def run(self, interval=5):
-        """Run stream processor"""
+
+    def run(self, interval=2):
+        """Run stream processor (micro-batch loop)."""
         logger.info("🔥 Spark Streaming started")
         self.running = True
         last_offset = 0
-        
+
         while self.running:
             try:
-                # Read from Kafka
                 events = self.kafka.consume('parking-events', from_offset=last_offset)
-                
-                # Process and write to Cassandra
+
                 for event in events:
                     processed = self.process_event(event)
+
+                    # Sliding-window aggregation
+                    self.aggregator.add(processed)
+
+                    # End-to-end latency: produce time -> processed now
+                    produced_at = _parse_ts(event.get('timestamp'))
+                    latency_ms = max(0.0, (time.time() - produced_at) * 1000.0)
+                    self.monitor.record_spark(latency_ms)
+
+                    # Write to Cassandra (timed)
+                    t0 = time.time()
                     self.cassandra.insert(processed)
-                    
+                    self.monitor.record_cassandra((time.time() - t0) * 1000.0)
+
                     with self.lock:
                         self.processed += 1
-                    
                     last_offset += 1
-                
+
                 if events:
                     logger.info(f"✅ Processed {len(events)} events (total: {self.processed})")
-                
+
                 time.sleep(interval)
-                
+
             except Exception as e:
                 logger.error(f"Error: {e}")
+                self.monitor.record_error()
                 time.sleep(interval)
-    
-    def start_async(self, interval=5):
+
+    def start_async(self, interval=2):
         """Start in background"""
         thread = threading.Thread(target=self.run, args=(interval,), daemon=True)
         thread.start()
         return thread
-    
+
     def stop(self):
         """Stop processing"""
         self.running = False
-    
+
+    def get_windows(self, limit=10):
+        """Get the latest windowed aggregations."""
+        return self.aggregator.get_windows(limit)
+
     def get_stats(self):
         """Get processing stats"""
         with self.lock:

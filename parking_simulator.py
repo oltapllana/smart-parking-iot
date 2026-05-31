@@ -5,6 +5,7 @@ Simulates realistic parking lot with dynamic occupancy patterns
 """
 
 import time
+import math
 import random
 import json
 import threading
@@ -55,7 +56,8 @@ class ParkingSpot:
 
 
 class ParkingLot:
-    def __init__(self, lot_id, zones=4, levels=3, spots_per_level=30, kafka_enabled=False):
+    def __init__(self, lot_id, zones=4, levels=3, spots_per_level=30, kafka_enabled=False,
+                 demo_cycle_seconds=240):
         self.lot_id = lot_id
         self.zones = zones
         self.levels = levels
@@ -64,6 +66,12 @@ class ParkingLot:
         self.spots = {}
         self.historical_occupancy = defaultdict(list)
         self.entry_exit_log = []
+
+        # Demo traffic model: occupancy sweeps a full low->high->low cycle
+        # over `demo_cycle_seconds` so the dashboard shows varied predictions
+        # and the alert engine actually fires during a live demo.
+        self.demo_cycle_seconds = demo_cycle_seconds
+        self._sim_start = time.time()
 
         self.kafka_enabled = kafka_enabled
         self.kafka_producer = None
@@ -189,23 +197,42 @@ class ParkingLot:
             'timestamp': datetime.now().isoformat()
         }
 
+    def _target_occupancy_fraction(self):
+        """Target occupancy (0..1) following a smooth daily-style cycle."""
+        elapsed = time.time() - self._sim_start
+        phase = (elapsed % self.demo_cycle_seconds) / self.demo_cycle_seconds
+        # Cosine sweep: 0.10 (empty-ish) -> ~0.97 (full) -> 0.10
+        wave = 0.5 - 0.5 * math.cos(2 * math.pi * phase)
+        target = 0.10 + 0.87 * wave
+        target += random.uniform(-0.02, 0.02)  # small jitter
+        return max(0.0, min(1.0, target))
+
     def simulate_traffic(self):
-        """Simulate parking lot traffic patterns"""
-
-        # TEST MODE: 90% chance of new vehicle arriving
-        if random.random() < 0.9:
-            spot = self.get_random_spot()
-            if spot:
-                vehicle_type = random.choice(['car', 'motorcycle', 'truck'])
-                self.occupy_spot(spot.spot_id, vehicle_type)
-
+        """Simulate parking lot traffic driving occupancy toward a target."""
         occupied_spots = [s for s in self.spots.values() if s.occupied]
-        for spot in occupied_spots:
-            spot.occupancy_time += 1
+        current = len(occupied_spots)
+        target = int(self._target_occupancy_fraction() * self.total_spots)
+        diff = target - current
 
-            # TEST MODE: vehicles leave faster
-            if spot.occupancy_time > random.randint(3, 8):
+        # Gradual convergence so entries/exits stream realistically
+        max_step = max(1, self.total_spots // 40)  # up to ~9 spots/tick
+
+        if diff > 0:
+            for _ in range(min(diff, max_step)):
+                spot = self.get_random_spot()
+                if spot:
+                    vehicle_type = random.choices(
+                        ['car', 'motorcycle', 'truck'], weights=[0.7, 0.2, 0.1])[0]
+                    self.occupy_spot(spot.spot_id, vehicle_type)
+        elif diff < 0:
+            to_vacate = random.sample(occupied_spots, min(-diff, max_step))
+            for spot in to_vacate:
                 self.vacate_spot(spot.spot_id)
+
+        # Age occupied spots
+        for spot in self.spots.values():
+            if spot.occupied:
+                spot.occupancy_time += 1
         
     def get_all_spots_status(self):
         """Get status of all parking spots"""

@@ -4,7 +4,16 @@ Smart Parking API Endpoints - Flask REST API
 Provides endpoints for parking lot data, predictions, and management
 """
 
-from flask import Flask, jsonify, request, render_template_string
+import sys
+
+# Ensure emoji-laden logs don't crash the Windows (cp1252) console
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except Exception:
+    pass
+
+from flask import Flask, jsonify, request, render_template_string, g
 from flask_cors import CORS
 from datetime import datetime, timedelta
 import json
@@ -17,6 +26,7 @@ from parking_alert_engine import ParkingAlertEngine
 
 # Use local pipeline (Kafka → Spark → Cassandra simulation)
 from local_pipeline import get_components
+from performance_monitor import get_monitor
 
 try:
     from cassandra_client import CassandraClient
@@ -27,6 +37,22 @@ except:
 
 app = Flask(__name__)
 CORS(app)
+
+
+@app.before_request
+def _start_timer():
+    g._start_time = time.time()
+
+
+@app.after_request
+def _record_latency(response):
+    try:
+        if hasattr(g, '_start_time'):
+            latency_ms = (time.time() - g._start_time) * 1000.0
+            get_monitor().record_api(latency_ms)
+    except Exception:
+        pass
+    return response
 
 # Global services
 parking_simulator = None
@@ -65,19 +91,28 @@ def initialize_services():
 
 def collect_data():
     """Background thread to collect parking data periodically"""
+    last_event_index = 0
     while True:
         try:
             if parking_simulator:
                 data = parking_simulator.get_lot_data()
                 historical_data.append(data)
-                
+
                 # Keep history under MAX_HISTORY
                 if len(historical_data) > MAX_HISTORY:
                     historical_data.pop(0)
-                
-                # Send to Kafka queue
+
                 if kafka_queue:
-                    event = {
+                    # 1) Drain the simulator's per-spot entry/exit events into
+                    #    Kafka so Spark windowing/Cassandra see real sensor events.
+                    log = parking_simulator.parking_lot.entry_exit_log
+                    new_events = log[last_event_index:]
+                    last_event_index = len(log)
+                    for ev in new_events:
+                        kafka_queue.produce('parking-events', ev, key=ev.get('lot_id'))
+
+                    # 2) Periodic aggregate status_update event
+                    status_event = {
                         'lot_id': data.get('lot_id'),
                         'timestamp': datetime.now().isoformat(),
                         'spot_id': 0,
@@ -88,13 +123,13 @@ def collect_data():
                         'vehicle_type': 'mixed',
                         'occupancy_duration': 0
                     }
-                    kafka_queue.produce('parking-events', event, key=data.get('lot_id'))
-                
+                    kafka_queue.produce('parking-events', status_event, key=data.get('lot_id'))
+
                 # Check for alerts
                 alert_engine.check_alerts(data)
         except Exception as e:
             print(f"Error collecting data: {e}")
-        
+
         time.sleep(5)  # Collect data every 5 seconds
 
 
@@ -330,7 +365,7 @@ def get_cassandra_events():
     if not cassandra_db:
         return jsonify({'error': 'Cassandra not initialized'}), 500
 
-    lot_id = request.args.get('lot_id', 'LOT-001')
+    lot_id = request.args.get('lot_id', 'LOT-MAIN-001')
     limit = request.args.get('limit', 20, type=int)
 
     try:
@@ -349,6 +384,60 @@ def get_cassandra_events():
             'error': 'Failed to fetch events from Cassandra',
             'details': str(e)
         }), 500
+
+
+@app.route('/api/parking/performance', methods=['GET'])
+def get_performance():
+    """Get real-time pipeline performance metrics (throughput, latency)."""
+    snap = get_monitor().snapshot()
+
+    # Augment with live pipeline stats
+    if spark_streamer:
+        try:
+            snap['pipeline_stats'] = spark_streamer.get_stats()
+        except Exception:
+            pass
+
+    return jsonify(snap)
+
+
+@app.route('/api/parking/windows', methods=['GET'])
+def get_windows():
+    """Get Spark-style sliding-window aggregations of the event stream."""
+    if not spark_streamer:
+        return jsonify({'error': 'Spark streamer not initialized'}), 500
+
+    limit = request.args.get('limit', 10, type=int)
+    windows = spark_streamer.get_windows(limit=limit)
+
+    return jsonify({
+        'window_count': len(windows),
+        'windows': windows,
+        'timestamp': datetime.now().isoformat()
+    })
+
+
+@app.route('/api/parking/ml-info', methods=['GET'])
+def get_ml_info():
+    """Get information about the trained ML models."""
+    if not ml_service:
+        return jsonify({'error': 'ML service not initialized'}), 500
+
+    return jsonify({
+        'model_info': ml_service.get_model_info(),
+        'timestamp': datetime.now().isoformat()
+    })
+
+
+@app.route('/api/parking/retrain', methods=['POST'])
+def retrain_models():
+    """Retrain the ML models on freshly generated synthetic data."""
+    if not ml_service:
+        return jsonify({'error': 'ML service not initialized'}), 500
+
+    n = request.json.get('samples', 4000) if request.json else 4000
+    info = ml_service.train_on_synthetic_data(n_samples=n)
+    return jsonify({'success': True, 'model_info': info})
 
 
 @app.route('/', methods=['GET'])
@@ -423,4 +512,6 @@ if __name__ == '__main__':
     print("🚀 Starting Smart Parking API Server")
     print("📍 Server running on http://localhost:5000")
     print("📊 API endpoints available at http://localhost:5000")
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # use_reloader=False: the reloader spawns a second process that would
+    # start a duplicate simulator + Spark thread writing to the same DB.
+    app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False)
