@@ -3,6 +3,7 @@ import axios from 'axios';
 import styled from 'styled-components';
 import { Activity, AlertCircle, TrendingUp, MapPin } from 'lucide-react';
 import ParkingOverview from './components/ParkingOverview';
+import ParkingMap from './components/ParkingMap';
 import ZoneStatus from './components/ZoneStatus';
 import OccupancyChart from './components/OccupancyChart';
 import AlertPanel from './components/AlertPanel';
@@ -314,6 +315,12 @@ function App() {
             </FullWidthCard>
           )}
         </>
+      )}
+
+      {activeTab === 'map' && parkingData && (
+        <FullWidthCard>
+          <ParkingMap zones={parkingData.lot_data.zone_statistics} />
+        </FullWidthCard>
       )}
 
       {activeTab === 'zones' && parkingData && (

@@ -1,6 +1,6 @@
 import React from 'react';
 import styled from 'styled-components';
-import { Home, AlertCircle, BarChart3, Map, List, Settings, Gauge } from 'lucide-react';
+import { Home, AlertCircle, BarChart3, Map, MapPin, List, Settings, Gauge } from 'lucide-react';
 
 const TabBar = styled.div`
   display: flex;
@@ -51,13 +51,14 @@ const Tab = styled.button`
 
 const TabNavigation = ({ activeTab, setActiveTab }) => {
   const tabs = [
-    { id: 'overview', label: 'Overview', icon: Home },
-    { id: 'zones', label: 'Zones', icon: Map },
-    { id: 'chart', label: 'Trends', icon: BarChart3 },
-    { id: 'events', label: 'Events', icon: List },
-    { id: 'alerts', label: 'Alerts', icon: AlertCircle },
+    { id: 'overview',    label: 'Overview',    icon: Home },
+    { id: 'map',         label: 'Parking Map', icon: MapPin },
+    { id: 'zones',       label: 'Zones',       icon: Map },
+    { id: 'chart',       label: 'Trends',      icon: BarChart3 },
+    { id: 'events',      label: 'Events',      icon: List },
+    { id: 'alerts',      label: 'Alerts',      icon: AlertCircle },
     { id: 'performance', label: 'Performance', icon: Gauge },
-    { id: 'system', label: 'System', icon: Settings }
+    { id: 'system',      label: 'System',      icon: Settings },
   ];
 
   return (

@@ -15,6 +15,9 @@ com.datastax.spark:spark-cassandra-connector_2.12:3.5.1 \
       /app/spark_streaming_job.py
 """
 
+import urllib.request
+import json as _json
+
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     col, from_json, to_timestamp, window, current_timestamp,
@@ -23,6 +26,29 @@ from pyspark.sql.functions import (
 from pyspark.sql.types import (
     StructType, StructField, StringType, IntegerType
 )
+
+# ML API Service URL (host.docker.internal resolves to the host from inside Docker)
+ML_API_URL = "http://host.docker.internal:8090"
+
+
+def _call_ml_api(occupancy_rate: float, occupied_spots: int, total_spots: int) -> dict:
+    """Call the ML API service and return the prediction dict, or {} on failure."""
+    payload = _json.dumps({
+        'occupancy_rate': occupancy_rate,
+        'occupied_spots': occupied_spots,
+        'available_spots': total_spots - occupied_spots,
+        'total_spots': total_spots,
+    }).encode()
+    req = urllib.request.Request(
+        f"{ML_API_URL}/predict",
+        data=payload,
+        headers={'Content-Type': 'application/json'},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            return _json.loads(resp.read())
+    except Exception:
+        return {}
 
 
 spark = (
@@ -79,13 +105,31 @@ events_out = (
 
 
 def write_events(batch_df, batch_id):
-    if batch_df.count() > 0:
+    n = batch_df.count()
+    if n > 0:
+        # --- ML API integration: predict on status_update events --------
+        status_rows = batch_df.filter(col("event") == "status_update").limit(3).collect()
+        for row in status_rows:
+            try:
+                occupied = int(row.occupied) if row.occupied and str(row.occupied).isdigit() else 0
+                total = 360  # default lot capacity
+                occupancy_rate = (occupied / total) * 100
+                prediction = _call_ml_api(occupancy_rate, occupied, total)
+                if prediction:
+                    avail_class = prediction.get('availability_class', 'N/A')
+                    confidence  = prediction.get('confidence', 0)
+                    print(f"🤖 ML [{row.lot_id}] {avail_class} "
+                          f"(conf {confidence:.0%}, occ {occupancy_rate:.1f}%)")
+            except Exception:
+                pass
+        # ----------------------------------------------------------------
+
         (batch_df.write
          .format("org.apache.spark.sql.cassandra")
          .mode("append")
          .options(table="parking_events", keyspace="smart_parking")
          .save())
-        print(f"✅ Batch {batch_id}: wrote {batch_df.count()} events to Cassandra")
+        print(f"✅ Batch {batch_id}: wrote {n} events to Cassandra")
 
 
 events_query = (

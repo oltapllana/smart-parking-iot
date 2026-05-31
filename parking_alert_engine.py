@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """
 Smart Parking Alert Engine
-Monitors parking lot conditions and generates alerts
+Monitors parking lot conditions and generates alerts.
+Critical alerts are forwarded to the SMS notification service when Twilio
+credentials are configured in alert_config.py.
 """
 
 from datetime import datetime, timedelta
 from enum import Enum
 import json
+
+from sms_notification_service import SmsNotificationService
 
 
 class AlertSeverity(Enum):
@@ -57,6 +61,7 @@ class ParkingAlertEngine:
         self.last_occupancy = 0
         self.occupancy_trend = []
         self.max_trend_history = 20
+        self.sms = SmsNotificationService()
         
     def check_alerts(self, lot_data):
         """Check for parking lot conditions that require alerts"""
@@ -93,6 +98,11 @@ class ParkingAlertEngine:
                 self.active_alerts.append(alert)
                 self.alert_history.append(alert)
                 print(f"🚨 {alert.message}")
+                self.sms.send_critical_alert(
+                    AlertType.LOT_FULL.value,
+                    f"Lot at {occupancy_rate:.0f}% capacity. Very few spots available.",
+                    occupancy_rate,
+                )
         
         elif occupancy_rate >= self.warning_threshold:
             # Check if alert already exists
