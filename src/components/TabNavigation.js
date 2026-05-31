@@ -1,31 +1,37 @@
 import React from 'react';
 import styled from 'styled-components';
-import { Home, AlertCircle, BarChart3, Map, List } from 'lucide-react';
+import { Home, AlertCircle, BarChart3, Map, List, Settings } from 'lucide-react';
 
 const TabBar = styled.div`
   display: flex;
-  gap: 10px;
-  margin-bottom: 20px;
-  background: white;
-  padding: 15px;
-  border-radius: 10px;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  gap: 12px;
+  margin-bottom: 25px;
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
   flex-wrap: wrap;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
 `;
 
 const Tab = styled.button`
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 20px;
+  padding: 12px 20px;
   border: none;
-  border-radius: 6px;
-  background: ${props => props.active ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : '#f0f0f0'};
-  color: ${props => props.active ? 'white' : '#666'};
+  border-radius: 8px;
+  background: ${props => props.active 
+    ? 'linear-gradient(135deg, #3b82f6 0%, #1e40af 100%)' 
+    : 'rgba(148, 163, 184, 0.1)'};
+  color: ${props => props.active ? '#ffffff' : '#cbd5e1'};
   cursor: pointer;
   font-size: 0.95em;
   font-weight: 500;
   transition: all 0.3s ease;
+  border: 1px solid ${props => props.active 
+    ? 'rgba(59, 130, 246, 0.5)' 
+    : 'transparent'};
   
   svg {
     width: 18px;
@@ -34,7 +40,12 @@ const Tab = styled.button`
   
   &:hover {
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    background: ${props => props.active 
+      ? 'linear-gradient(135deg, #3b82f6 0%, #1e40af 100%)' 
+      : 'rgba(148, 163, 184, 0.2)'};
+    box-shadow: 0 4px 15px ${props => props.active 
+      ? 'rgba(59, 130, 246, 0.3)' 
+      : 'rgba(0, 0, 0, 0.2)'};
   }
 `;
 
@@ -42,9 +53,10 @@ const TabNavigation = ({ activeTab, setActiveTab }) => {
   const tabs = [
     { id: 'overview', label: 'Overview', icon: Home },
     { id: 'zones', label: 'Zones', icon: Map },
-    { id: 'events', label: 'Latest Events', icon: List },
     { id: 'chart', label: 'Trends', icon: BarChart3 },
-    { id: 'alerts', label: 'Alerts', icon: AlertCircle }
+    { id: 'events', label: 'Events', icon: List },
+    { id: 'alerts', label: 'Alerts', icon: AlertCircle },
+    { id: 'system', label: 'System', icon: Settings }
   ];
 
   return (

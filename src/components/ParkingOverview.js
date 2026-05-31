@@ -2,10 +2,11 @@ import React from 'react';
 import styled from 'styled-components';
 
 const Container = styled.div`
-  background: white;
-  border-radius: 10px;
-  padding: 20px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  border-radius: 12px;
+  padding: 25px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.15);
 `;
 
 const StatGrid = styled.div`
@@ -44,7 +45,8 @@ const StatBox = styled.div`
 const ProgressSection = styled.div`
   margin-top: 20px;
   padding: 20px;
-  background: #f8f9fa;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
   border-radius: 8px;
 `;
 
@@ -53,18 +55,20 @@ const ProgressLabel = styled.div`
   justify-content: space-between;
   margin-bottom: 8px;
   font-weight: bold;
+  color: #e2e8f0;
 `;
 
 const ProgressBar = styled.div`
   width: 100%;
   height: 30px;
-  background: #e9ecef;
+  background: rgba(148, 163, 184, 0.2);
   border-radius: 15px;
   overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.3);
   
   .fill {
     height: 100%;
-    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(90deg, #3b82f6 0%, #1e40af 100%);
     width: ${props => props.percentage}%;
     transition: width 0.3s ease;
     display: flex;

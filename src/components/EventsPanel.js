@@ -12,22 +12,30 @@ const Table = styled.table`
 
   th, td {
     text-align: left;
-    padding: 8px 10px;
-    border-bottom: 1px solid #eee;
+    padding: 12px 10px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.2);
     font-size: 0.95em;
+    color: #e2e8f0;
   }
 
   th {
-    background: #fafafa;
+    background: rgba(59, 130, 246, 0.1);
+    border-bottom: 2px solid rgba(59, 130, 246, 0.3);
     position: sticky;
     top: 0;
     z-index: 2;
+    color: #60a5fa;
+    font-weight: 600;
+  }
+
+  tbody tr:hover {
+    background: rgba(59, 130, 246, 0.05);
   }
 `;
 
 const Empty = styled.div`
   padding: 20px;
-  color: #666;
+  color: #94a3b8;
 `;
 
 function formatDuration(sec) {

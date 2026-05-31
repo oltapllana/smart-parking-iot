@@ -3,10 +3,11 @@ import styled from 'styled-components';
 import { TrendingUp, TrendingDown, AlertCircle } from 'lucide-react';
 
 const Container = styled.div`
-  background: white;
-  border-radius: 10px;
-  padding: 20px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  border-radius: 12px;
+  padding: 25px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.15);
 `;
 
 const Grid = styled.div`
@@ -59,7 +60,7 @@ const TrendIndicator = styled.div`
 `;
 
 const RecommendationBox = styled.div`
-  background: #f0f4ff;
+  background: rgba(148, 163, 184, 0.2);
   border-left: 4px solid #667eea;
   padding: 15px;
   border-radius: 5px;
