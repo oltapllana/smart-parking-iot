@@ -78,7 +78,7 @@ def initialize_services():
     print("   ✅ Cassandra database ready")
     
     parking_simulator = ParkingSimulator('LOT-MAIN-001')
-    parking_simulator.start_simulation(interval=0.5)
+    parking_simulator.start_simulation(interval=2)
     
     ml_service = ParkingMLService()
     alert_engine = ParkingAlertEngine()

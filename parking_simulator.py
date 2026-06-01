@@ -57,7 +57,7 @@ class ParkingSpot:
 
 class ParkingLot:
     def __init__(self, lot_id, zones=4, levels=3, spots_per_level=30, kafka_enabled=False,
-                 demo_cycle_seconds=240):
+                 demo_cycle_seconds=900):
         self.lot_id = lot_id
         self.zones = zones
         self.levels = levels
