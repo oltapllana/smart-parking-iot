@@ -6,6 +6,12 @@ SMS is silently disabled when any credential is missing.
 """
 import os
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # Occupancy thresholds (%)
 WARNING_THRESHOLD  = 75
 CRITICAL_THRESHOLD = 90

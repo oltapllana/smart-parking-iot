@@ -4,7 +4,8 @@ Apache Spark Structured Streaming job for the Smart Parking IoT pipeline.
 
 Reads sensor events from Kafka, validates/enriches them, writes the raw
 processed events to Cassandra AND computes 1-minute windowed aggregations
-(event volume + entries/exits) written to a second Cassandra table.
+(event volume + entries/exits + average occupancy duration) written to a
+second Cassandra table.
 
 Run inside the `spark` container:
 
@@ -21,7 +22,7 @@ import json as _json
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     col, from_json, to_timestamp, window, current_timestamp,
-    count, sum as _sum, when, lit, date_format
+    count, sum as _sum, avg, when, lit, date_format
 )
 from pyspark.sql.types import (
     StructType, StructField, StringType, IntegerType
@@ -144,19 +145,21 @@ events_query = (
 windowed = (
     parsed
     .withWatermark("event_time", "2 minutes")
-    .groupBy(col("lot_id"), window(col("event_time"), "1 minute"))
+    .groupBy(col("zone"), window(col("event_time"), "1 minute"))
     .agg(
         count(lit(1)).alias("event_count"),
-        _sum(when(col("event") == "entry", 1).otherwise(0)).alias("entries"),
-        _sum(when(col("event") == "exit", 1).otherwise(0)).alias("exits"),
+        _sum(when(col("event") == "entry", 1).otherwise(0)).alias("entry_count"),
+        _sum(when(col("event") == "exit", 1).otherwise(0)).alias("exit_count"),
+        avg(col("occupancy_duration")).alias("avg_occupancy_duration"),
     )
     .select(
-        col("lot_id"),
+        col("zone"),
         date_format(col("window.start"), "yyyy-MM-dd'T'HH:mm:ss").alias("window_start"),
         date_format(col("window.end"), "yyyy-MM-dd'T'HH:mm:ss").alias("window_end"),
+        col("avg_occupancy_duration"),
+        col("entry_count"),
         col("event_count"),
-        col("entries"),
-        col("exits"),
+        col("exit_count"),
     )
 )
 
@@ -175,7 +178,7 @@ windows_query = (
     windowed.writeStream
     .foreachBatch(write_windows)
     .outputMode("update")
-    .option("checkpointLocation", "/tmp/chk_windows")
+    .option("checkpointLocation", "/tmp/chk_windows_v2")
     .start()
 )
 

@@ -67,8 +67,8 @@ services:
         condition: service_healthy
     volumes:
       - ./cassandra_schema.cql:/schema.cql
-    entrypoint: ["/bin/sh", "-c"]
-    command: "cqlsh cassandra -f /schema.cql && echo '✅ Cassandra schema applied'"
+    command: >
+      sh -c "cqlsh cassandra 9042 -f /schema.cql"
 
   spark:
     image: apache/spark:3.5.6

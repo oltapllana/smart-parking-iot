@@ -102,6 +102,7 @@ class ParkingAlertEngine:
                     AlertType.LOT_FULL.value,
                     f"Lot at {occupancy_rate:.0f}% capacity. Very few spots available.",
                     occupancy_rate,
+                    lot_data.get('lot_id'),
                 )
         
         elif occupancy_rate >= self.warning_threshold:

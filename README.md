@@ -88,6 +88,20 @@ A comprehensive real-time IoT system for smart parking lot management with **ML-
 - **npm** (Node package manager)
 - **4GB RAM** minimum
 
+## 🔐 Environment Variables
+
+Twilio credentials can be stored in a local `.env` file in the project root. The app loads it automatically when present.
+
+Example:
+```env
+TWILIO_ACCOUNT_SID=your_account_sid
+TWILIO_AUTH_TOKEN=your_auth_token
+TWILIO_FROM_NUMBER=+1234567890
+TWILIO_TO_NUMBER=+0987654321
+```
+
+The `.env` file is already ignored by git, so it stays local.
+
 ### Installation Steps
 
 1. **Install Python** (if not installed)

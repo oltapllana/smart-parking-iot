@@ -293,6 +293,37 @@ def get_alerts():
     })
 
 
+@app.route('/api/parking/sms-status', methods=['GET'])
+def sms_status():
+    """Check whether SMS is currently usable."""
+    if not alert_engine or not hasattr(alert_engine, 'sms'):
+        return jsonify({'error': 'SMS service not initialized'}), 500
+
+    return jsonify({
+        'status': alert_engine.sms.status,
+        'timestamp': datetime.now().isoformat(),
+    })
+
+
+@app.route('/api/parking/test-sms', methods=['POST'])
+def test_sms():
+    """Send a test SMS using the same critical-alert path."""
+    if not alert_engine or not hasattr(alert_engine, 'sms'):
+        return jsonify({'error': 'SMS service not initialized'}), 500
+
+    payload = request.json or {}
+    lot_id = payload.get('lot_id', 'LOT-TEST-001')
+    occupancy = payload.get('occupancy', 92.0)
+
+    result = alert_engine.sms.send_test_message(lot_id=lot_id, occupancy=float(occupancy))
+
+    return jsonify({
+        'success': result.get('sent', False),
+        'result': result,
+        'timestamp': datetime.now().isoformat(),
+    }), (200 if result.get('sent', False) else 400)
+
+
 @app.route('/api/parking/statistics', methods=['GET'])
 def get_statistics():
     """Get parking statistics"""
@@ -491,6 +522,12 @@ def index():
             </div>
             <div class="endpoint">
                 <strong>GET /api/parking/alerts</strong> - Active alerts
+            </div>
+            <div class="endpoint">
+                <strong>GET /api/parking/sms-status</strong> - SMS readiness check
+            </div>
+            <div class="endpoint">
+                <strong>POST /api/parking/test-sms</strong> - Send a test SMS
             </div>
             <div class="endpoint">
                 <strong>GET /api/parking/statistics</strong> - Parking statistics
