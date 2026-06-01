@@ -107,17 +107,21 @@ const StatusItem = styled.div`
 
 const MainGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+  grid-template-columns: 1fr 1fr;
+  align-items: start;
   gap: 25px;
   margin-bottom: 30px;
-  
-  @media (max-width: 1200px) {
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  }
-  
+
   @media (max-width: 768px) {
     grid-template-columns: 1fr;
   }
+`;
+
+// Stacks items vertically within a single grid column (e.g. Overview + Alerts)
+const Column = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 25px;
 `;
 
 const Card = styled.div`
@@ -294,18 +298,22 @@ function App() {
       {activeTab === 'overview' && (
         <>
           <MainGrid>
-            {parkingData && <ParkingOverview data={parkingData.lot_data} />}
-            {predictions && <PredictionPanel prediction={predictions} />}
-            {alerts.length > 0 && (
-              <Card>
-                <h3>🚨 Active Alerts ({alerts.length})</h3>
-                <div style={{ marginTop: '15px', padding: '12px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '8px', borderLeft: '3px solid #ef4444' }}>
-                  <p style={{ margin: '0 0 8px 0', fontSize: '0.95em' }}><strong>{alerts[0].alert_type}</strong></p>
-                  <p style={{ margin: 0, opacity: 0.8, fontSize: '0.9em' }}>{alerts[0].message}</p>
-                  <p style={{ margin: '8px 0 0 0', fontSize: '0.85em', opacity: 0.6 }}>{new Date(alerts[0].timestamp).toLocaleTimeString()}</p>
-                </div>
-              </Card>
-            )}
+            <Column>
+              {parkingData && <ParkingOverview data={parkingData.lot_data} />}
+              {alerts.length > 0 && (
+                <Card>
+                  <h3>🚨 Active Alerts ({alerts.length})</h3>
+                  <div style={{ marginTop: '15px', padding: '12px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '8px', borderLeft: '3px solid #ef4444' }}>
+                    <p style={{ margin: '0 0 8px 0', fontSize: '0.95em' }}><strong>{alerts[0].alert_type}</strong></p>
+                    <p style={{ margin: 0, opacity: 0.8, fontSize: '0.9em' }}>{alerts[0].message}</p>
+                    <p style={{ margin: '8px 0 0 0', fontSize: '0.85em', opacity: 0.6 }}>{new Date(alerts[0].timestamp).toLocaleTimeString()}</p>
+                  </div>
+                </Card>
+              )}
+            </Column>
+            <Column>
+              {predictions && <PredictionPanel prediction={predictions} demand={parkingData?.analytics?.demand_prediction} modelInfo={parkingData?.analytics?.model_info} history={occupancyHistory} weather={parkingData?.lot_data?.weather} specialEvent={parkingData?.lot_data?.special_event} />}
+            </Column>
           </MainGrid>
           
           {events.length > 0 && (

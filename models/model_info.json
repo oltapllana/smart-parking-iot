@@ -1,15 +1,19 @@
 {
   "trained": true,
   "algorithm": "RandomForest",
-  "classifier_accuracy": 0.86,
-  "regressor_mae": 5.1635,
+  "classifier_accuracy": 0.9,
+  "regressor_mae": 2.5422,
   "training_samples": 4000,
   "features": [
     "occupancy_rate",
     "hour_of_day",
     "day_of_week",
     "is_weekend",
-    "recent_trend"
+    "recent_trend",
+    "weather",
+    "special_event"
   ],
-  "trained_at": "2026-05-31T22:27:35.814004"
+  "trained_at": "2026-06-01T13:06:24.828488",
+  "real_samples": 0,
+  "data_source": "synthetic"
 }

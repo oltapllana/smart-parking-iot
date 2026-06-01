@@ -73,6 +73,11 @@ class ParkingLot:
         self.demo_cycle_seconds = demo_cycle_seconds
         self._sim_start = time.time()
 
+        # External context that influences parking demand (drives the ML
+        # weather/special-event features). Updated each tick from elapsed time.
+        self.weather = 'clear'
+        self.special_event = False
+
         self.kafka_enabled = kafka_enabled
         self.kafka_producer = None
 
@@ -194,16 +199,36 @@ class ParkingLot:
                 }
                 for zone in [f"Zone-{i + 1}" for i in range(self.zones)]
             },
+            'weather': self.weather,
+            'special_event': self.special_event,
             'timestamp': datetime.now().isoformat()
         }
 
+    # Extra demand (0..1) added by adverse weather — people drive more.
+    WEATHER_BOOST = {'clear': 0.0, 'rain': 0.07, 'snow': 0.14}
+
+    def _update_context(self, elapsed):
+        """Update weather + special-event state so the demo visibly cycles
+        through conditions that influence parking demand."""
+        # Weather: mostly clear, with periodic rain/snow windows (~100s each)
+        weather_cycle = ['clear', 'clear', 'rain', 'snow']
+        self.weather = weather_cycle[int(elapsed // 100) % len(weather_cycle)]
+        # Special event (match/concert nearby): active ~1 min every 4 min
+        self.special_event = (int(elapsed // 60) % 4 == 3)
+
     def _target_occupancy_fraction(self):
-        """Target occupancy (0..1) following a smooth daily-style cycle."""
+        """Target occupancy (0..1) following a smooth daily-style cycle,
+        nudged up by weather and special events."""
         elapsed = time.time() - self._sim_start
+        self._update_context(elapsed)
         phase = (elapsed % self.demo_cycle_seconds) / self.demo_cycle_seconds
         # Cosine sweep: 0.10 (empty-ish) -> ~0.97 (full) -> 0.10
         wave = 0.5 - 0.5 * math.cos(2 * math.pi * phase)
         target = 0.10 + 0.87 * wave
+        # External demand drivers
+        target += self.WEATHER_BOOST.get(self.weather, 0.0)
+        if self.special_event:
+            target += 0.15
         target += random.uniform(-0.02, 0.02)  # small jitter
         return max(0.0, min(1.0, target))
 

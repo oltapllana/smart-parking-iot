@@ -43,7 +43,7 @@ class ParkingMLService:
             'regressor_mae': None,
             'training_samples': 0,
             'features': ['occupancy_rate', 'hour_of_day', 'day_of_week',
-                         'is_weekend', 'recent_trend'],
+                         'is_weekend', 'recent_trend', 'weather', 'special_event'],
             'trained_at': None
         }
 
@@ -96,7 +96,16 @@ class ParkingMLService:
     # ------------------------------------------------------------------
     # Feature engineering (fixed-length vector so the model is stable)
     # ------------------------------------------------------------------
-    def _feature_vector(self, occupancy_rate, hour, day_of_week, recent_trend=0.0):
+    # Weather encoded as a 0..1 severity (clear -> snow); higher = more demand.
+    WEATHER_CODE = {'clear': 0.0, 'rain': 0.5, 'snow': 1.0}
+
+    def _weather_code(self, weather):
+        if isinstance(weather, (int, float)):
+            return float(weather)
+        return self.WEATHER_CODE.get(str(weather).lower(), 0.0)
+
+    def _feature_vector(self, occupancy_rate, hour, day_of_week, recent_trend=0.0,
+                        weather=0.0, special_event=0.0):
         is_weekend = 1.0 if day_of_week >= 5 else 0.0
         return [
             occupancy_rate / 100.0,
@@ -104,12 +113,16 @@ class ParkingMLService:
             day_of_week / 6.0,
             is_weekend,
             recent_trend / 100.0,
+            weather,            # 0=clear, 0.5=rain, 1=snow
+            special_event,      # 1 if a special event is driving demand
         ]
 
     def extract_features(self, lot_data, historical_data=None):
         """Build the live feature vector from current lot data."""
         now = datetime.now()
         occupancy_rate = lot_data.get('occupancy_rate', 0)
+        weather = self._weather_code(lot_data.get('weather', 'clear'))
+        special_event = 1.0 if lot_data.get('special_event') else 0.0
 
         recent_trend = 0.0
         if historical_data and len(historical_data) >= 2:
@@ -117,7 +130,8 @@ class ParkingMLService:
             recent_trend = rates[-1] - rates[0]
 
         return np.array([self._feature_vector(
-            occupancy_rate, now.hour, now.weekday(), recent_trend)])
+            occupancy_rate, now.hour, now.weekday(), recent_trend,
+            weather, special_event)])
 
     # ------------------------------------------------------------------
     # Synthetic training data
@@ -145,17 +159,36 @@ class ParkingMLService:
             hour = int(rng.integers(0, 24))
             day = int(rng.integers(0, 7))
             base = self._baseline_occupancy(hour, day)
-            noise = rng.normal(0, 8)
-            occ = float(np.clip(base + noise, 0, 100))
 
-            # Recent trend correlated with the slope of the daily curve
-            next_base = self._baseline_occupancy((hour + 1) % 24, day)
-            trend = (next_base - base) + rng.normal(0, 5)
+            # Make occupancy_rate (not the clock) the DOMINANT predictor:
+            # half the samples follow the time-of-day baseline, half are drawn
+            # uniformly so every occupancy level is seen at every hour. This
+            # matches the live system, where occupancy is driven by real demand
+            # rather than being tightly tied to wall-clock time — so a nearly
+            # full lot is predicted FULL with high confidence regardless of hour.
+            if rng.random() < 0.5:
+                occ = float(np.clip(base + rng.normal(0, 8), 0, 100))
+            else:
+                occ = float(rng.uniform(0, 100))
 
-            X.append(self._feature_vector(occ, hour, day, trend))
+            # Short-term trend, independent of the absolute level
+            trend = float(rng.normal(0, 8))
 
-            # Regression target: occupancy ~30 min ahead (genuinely predictive)
-            future = float(np.clip(base + 0.5 * trend + rng.normal(0, 6), 0, 100))
+            # External demand drivers: weather (clear/rain/snow) and special
+            # events. They mostly push FUTURE demand up, so the model learns
+            # them as genuinely predictive signals (not just echoes of occ).
+            weather = float(rng.choice([0.0, 0.5, 1.0], p=[0.6, 0.3, 0.1]))
+            special_event = 1.0 if rng.random() < 0.15 else 0.0
+            forward_demand = weather * 10.0 + special_event * 16.0
+
+            X.append(self._feature_vector(occ, hour, day, trend, weather, special_event))
+
+            # Regression target: occupancy ~30 min ahead, anchored on the
+            # CURRENT occupancy plus trend and the external demand drivers.
+            # Tight noise keeps the short-horizon forecast crisp, so extremes
+            # are predicted with high confidence. Still genuinely predictive.
+            future = float(np.clip(
+                occ + 0.5 * trend + forward_demand + rng.normal(0, 3), 0, 100))
             y_reg.append(future)
 
             # Classifier predicts the FUTURE availability class from the
@@ -199,10 +232,115 @@ class ParkingMLService:
             'trained_at': datetime.now().isoformat()
         })
 
+        self.model_info['real_samples'] = 0
+        self.model_info['data_source'] = 'synthetic'
         self._save_models()
         print(f"✅ Models trained — availability accuracy={acc:.2%}, "
               f"demand MAE={mae:.2f}%")
         return self.model_info
+
+    # ------------------------------------------------------------------
+    # Real-data training (closed feedback loop: collect → store → retrain)
+    # ------------------------------------------------------------------
+    def _samples_from_history(self, history, lookback=6, horizon=6):
+        """Build (X, y_class, y_reg) from collected lot-data observations.
+
+        `history` is an ordered (oldest→newest) list of lot_data dicts, each
+        holding at least 'occupancy_rate' and 'timestamp'. For each point we
+        use the current occupancy + recent trend as features and the occupancy
+        `horizon` steps later as the prediction target.
+        """
+        pts = []
+        for d in history:
+            occ = d.get('occupancy_rate')
+            if occ is None:
+                continue
+            ts = d.get('timestamp')
+            try:
+                dt = datetime.fromisoformat(ts) if ts else datetime.now()
+            except Exception:
+                dt = datetime.now()
+            weather = self._weather_code(d.get('weather', 'clear'))
+            event = 1.0 if d.get('special_event') else 0.0
+            pts.append((float(occ), dt, weather, event))
+
+        X, y_class, y_reg = [], [], []
+        n = len(pts)
+        for i in range(n - horizon):
+            occ, dt, weather, event = pts[i]
+            j = max(0, i - lookback)
+            recent_trend = occ - pts[j][0]
+            future = pts[i + horizon][0]
+
+            X.append(self._feature_vector(occ, dt.hour, dt.weekday(),
+                                          recent_trend, weather, event))
+            y_reg.append(future)
+            if future >= 95:
+                y_class.append('FULL')
+            elif future >= 80:
+                y_class.append('LOW')
+            elif future >= 50:
+                y_class.append('MEDIUM')
+            else:
+                y_class.append('HIGH')
+
+        return np.array(X), np.array(y_class), np.array(y_reg)
+
+    def train_on_real_data(self, history, min_samples=40, augment_synthetic=2000):
+        """Retrain on REAL collected occupancy history, blended with synthetic
+        data so every availability class stays represented and the model is
+        robust across the full occupancy range."""
+        real_X, real_yc, real_yr = self._samples_from_history(history)
+        n_real = len(real_X)
+
+        if n_real < min_samples:
+            return {
+                'success': False,
+                'reason': (f'Not enough real data yet: {n_real} usable samples '
+                           f'(need ≥ {min_samples}). Let the system run longer, '
+                           f'then retrain.'),
+                'real_samples': int(n_real),
+            }
+
+        print(f"🤖 Retraining on {n_real} REAL samples "
+              f"(+{augment_synthetic} synthetic for robustness)...")
+
+        if augment_synthetic:
+            syn_X, syn_yc, syn_yr = self._generate_synthetic_dataset(augment_synthetic)
+            X = np.vstack([real_X, syn_X])
+            y_class = np.concatenate([real_yc, syn_yc])
+            y_reg = np.concatenate([real_yr, syn_yr])
+        else:
+            X, y_class, y_reg = real_X, real_yc, real_yr
+
+        X_scaled = self.scaler.fit_transform(X)
+
+        Xc_tr, Xc_te, yc_tr, yc_te = train_test_split(
+            X_scaled, y_class, test_size=0.2, random_state=42)
+        Xr_tr, Xr_te, yr_tr, yr_te = train_test_split(
+            X_scaled, y_reg, test_size=0.2, random_state=42)
+
+        self.availability_classifier.fit(Xc_tr, yc_tr)
+        self.demand_predictor.fit(Xr_tr, yr_tr)
+        self.occupancy_clusterer.fit(X_scaled)
+
+        acc = accuracy_score(yc_te, self.availability_classifier.predict(Xc_te))
+        mae = mean_absolute_error(yr_te, self.demand_predictor.predict(Xr_te))
+
+        self.model_info.update({
+            'trained': True,
+            'algorithm': 'RandomForest',
+            'classifier_accuracy': round(float(acc), 4),
+            'regressor_mae': round(float(mae), 4),
+            'training_samples': int(len(X)),
+            'real_samples': int(n_real),
+            'data_source': 'real+synthetic' if augment_synthetic else 'real',
+            'trained_at': datetime.now().isoformat(),
+        })
+
+        self._save_models()
+        print(f"✅ Retrained on real data — accuracy={acc:.2%}, MAE={mae:.2f}%")
+        return {'success': True, 'model_info': self.model_info}
 
     def _save_models(self):
         joblib.dump(self.availability_classifier,

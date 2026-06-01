@@ -462,13 +462,40 @@ def get_ml_info():
 
 @app.route('/api/parking/retrain', methods=['POST'])
 def retrain_models():
-    """Retrain the ML models on freshly generated synthetic data."""
+    """Retrain the ML models.
+
+    Body (JSON, optional):
+      {"mode": "real"}      -> retrain on collected occupancy history
+                               (blended with synthetic for robustness)
+      {"mode": "synthetic"} -> retrain on freshly generated synthetic data
+      {"samples": <int>}    -> synthetic sample count (synthetic mode)
+    Defaults to real-data training, falling back to synthetic if there is
+    not yet enough collected history.
+    """
     if not ml_service:
         return jsonify({'error': 'ML service not initialized'}), 500
 
-    n = request.json.get('samples', 4000) if request.json else 4000
+    body = request.json or {}
+    mode = body.get('mode', 'real')
+
+    if mode == 'real':
+        result = ml_service.train_on_real_data(list(historical_data))
+        if result.get('success'):
+            return jsonify(result)
+        # Not enough real data yet — fall back to synthetic so the call still
+        # produces a usable model, and tell the caller why.
+        n = body.get('samples', 4000)
+        info = ml_service.train_on_synthetic_data(n_samples=n)
+        return jsonify({
+            'success': True,
+            'mode': 'synthetic (fallback)',
+            'note': result.get('reason'),
+            'model_info': info,
+        })
+
+    n = body.get('samples', 4000)
     info = ml_service.train_on_synthetic_data(n_samples=n)
-    return jsonify({'success': True, 'model_info': info})
+    return jsonify({'success': True, 'mode': 'synthetic', 'model_info': info})
 
 
 @app.route('/', methods=['GET'])
