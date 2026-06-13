@@ -102,6 +102,20 @@ TWILIO_TO_NUMBER=+0987654321
 
 The `.env` file is already ignored by git, so it stays local.
 
+### Real Cassandra Mode
+
+To make the API/dashboard read from the real Cassandra container instead of the local SQLite fallback, start the API with:
+
+```powershell
+$env:USE_REAL_CASSANDRA = "true"
+$env:CASSANDRA_HOST = "127.0.0.1"
+$env:CASSANDRA_PORT = "9042"
+$env:CASSANDRA_KEYSPACE = "smart_parking"
+python parking_api_endpoints.py
+```
+
+If the API runs inside Docker, use `CASSANDRA_HOST=cassandra` instead. Leave `USE_REAL_CASSANDRA` unset or `false` to keep the existing local demo mode.
+
 ### Installation Steps
 
 1. **Install Python** (if not installed)
@@ -194,6 +208,28 @@ The dashboard will open automatically at http://localhost:3000
 - `GET /api/parking/ml-info` - Trained ML model metadata & feature importances
 - `POST /api/parking/retrain` - Retrain the ML models on fresh synthetic data
 - `GET /api/parking/events?limit=20` - Latest events stored in Cassandra
+
+## 🧪 Docker Verification Checklist
+
+Use these commands to prove the real pipeline end to end:
+
+```powershell
+docker compose up -d
+docker exec -it smartparking-kafka kafka-topics --bootstrap-server kafka:29092 --list
+docker exec -it smartparking-spark /opt/spark/bin/spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.6,com.datastax.spark:spark-cassandra-connector_2.12:3.5.1 --conf spark.cassandra.connection.host=cassandra /app/spark_streaming_job.py
+python kafka_simulator_runner.py
+docker exec -it smartparking-cassandra cqlsh -e "SELECT count(*) FROM smart_parking.parking_events;"
+docker exec -it smartparking-cassandra cqlsh -e "SELECT count(*) FROM smart_parking.parking_window_stats;"
+```
+
+To prove the API is reading real Cassandra, start it with `USE_REAL_CASSANDRA=true` and then call:
+
+```powershell
+Invoke-RestMethod http://localhost:5000/api/parking/events?limit=5
+Invoke-RestMethod http://localhost:5000/api/parking/windows?limit=5
+```
+
+The React dashboard uses the API, so once the API is in `REAL_CASSANDRA` mode the dashboard will render real Cassandra-backed data instead of the SQLite fallback.
 
 ## 🎮 Dashboard Guide
 

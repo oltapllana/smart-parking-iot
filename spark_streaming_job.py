@@ -18,6 +18,7 @@ com.datastax.spark:spark-cassandra-connector_2.12:3.5.1 \
 
 import urllib.request
 import json as _json
+import os
 
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
@@ -29,7 +30,7 @@ from pyspark.sql.types import (
 )
 
 # ML API Service URL (host.docker.internal resolves to the host from inside Docker)
-ML_API_URL = "http://host.docker.internal:8090"
+ML_API_URL = os.getenv("ML_API_URL", "http://host.docker.internal:8090")
 
 
 def _call_ml_api(occupancy_rate: float, occupied_spots: int, total_spots: int) -> dict:
@@ -145,21 +146,21 @@ events_query = (
 windowed = (
     parsed
     .withWatermark("event_time", "2 minutes")
-    .groupBy(col("zone"), window(col("event_time"), "1 minute"))
+    .groupBy(col("lot_id"), window(col("event_time"), "1 minute"))
     .agg(
         count(lit(1)).alias("event_count"),
-        _sum(when(col("event") == "entry", 1).otherwise(0)).alias("entry_count"),
-        _sum(when(col("event") == "exit", 1).otherwise(0)).alias("exit_count"),
+        _sum(when(col("event") == "entry", 1).otherwise(0)).alias("entries"),
+        _sum(when(col("event") == "exit", 1).otherwise(0)).alias("exits"),
         avg(col("occupancy_duration")).alias("avg_occupancy_duration"),
     )
     .select(
-        col("zone"),
+        col("lot_id"),
         date_format(col("window.start"), "yyyy-MM-dd'T'HH:mm:ss").alias("window_start"),
         date_format(col("window.end"), "yyyy-MM-dd'T'HH:mm:ss").alias("window_end"),
         col("avg_occupancy_duration"),
-        col("entry_count"),
+        col("entries"),
         col("event_count"),
-        col("exit_count"),
+        col("exits"),
     )
 )
 

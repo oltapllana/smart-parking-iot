@@ -17,6 +17,7 @@ from flask import Flask, jsonify, request, render_template_string, g
 from flask_cors import CORS
 from datetime import datetime, timedelta
 import json
+import os
 import threading
 import time
 
@@ -63,19 +64,99 @@ MAX_HISTORY = 1000
 kafka_queue = None
 cassandra_db = None
 spark_streamer = None
+pipeline_mode = "LOCAL_FALLBACK"
+
+
+def _env_flag(name, default=False):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _get_cassandra_settings():
+    return {
+        'use_real_cassandra': _env_flag('USE_REAL_CASSANDRA', False),
+        'host': os.getenv('CASSANDRA_HOST', '127.0.0.1'),
+        'port': int(os.getenv('CASSANDRA_PORT', '9042')),
+        'keyspace': os.getenv('CASSANDRA_KEYSPACE', 'smart_parking'),
+    }
+
+
+def _empty_dashboard_payload(source='LOCAL_FALLBACK'):
+    return {
+        'source': source,
+        'count': 0,
+        'events': [],
+        'timestamp': datetime.now().isoformat(),
+    }
+
+
+def _empty_window_payload(source='LOCAL_FALLBACK'):
+    return {
+        'source': source,
+        'window_count': 0,
+        'windows': [],
+        'timestamp': datetime.now().isoformat(),
+    }
+
+
+def _get_dashboard_lot_data(lot_id='LOT-MAIN-001'):
+    if pipeline_mode == 'REAL_CASSANDRA' and cassandra_db and hasattr(cassandra_db, 'get_latest_status_snapshot'):
+        try:
+            return cassandra_db.get_latest_status_snapshot(lot_id=lot_id)
+        except Exception:
+            return {}
+
+    if parking_simulator:
+        try:
+            return parking_simulator.get_lot_data()
+        except Exception:
+            return {}
+
+    return {}
 
 
 def initialize_services():
     """Initialize all parking services"""
     global parking_simulator, ml_service, alert_engine
     global kafka_queue, cassandra_db, spark_streamer
+    global pipeline_mode
 
-    # Initialize local pipeline (Kafka → Spark → Cassandra)
-    print("🔥 Initializing Local IoT Pipeline...")
-    kafka_queue, cassandra_db, spark_streamer = get_components()
-    print("   ✅ Kafka simulator ready")
-    print("   ✅ Spark streaming ready")
-    print("   ✅ Cassandra database ready")
+    cassandra_settings = _get_cassandra_settings()
+    use_real_cassandra = cassandra_settings['use_real_cassandra']
+
+    if use_real_cassandra:
+        pipeline_mode = 'REAL_CASSANDRA'
+        print("🔥 Initializing REAL_CASSANDRA mode...")
+        print(f"   Cassandra host={cassandra_settings['host']} port={cassandra_settings['port']} keyspace={cassandra_settings['keyspace']}")
+        kafka_queue = None
+        spark_streamer = None
+        cassandra_db = None
+
+        if HAS_CASSANDRA:
+            try:
+                cassandra_db = CassandraClient(
+                    host=cassandra_settings['host'],
+                    port=cassandra_settings['port'],
+                    keyspace=cassandra_settings['keyspace'],
+                )
+                cassandra_db.connect()
+                print("   ✅ REAL_CASSANDRA connected")
+            except Exception as e:
+                cassandra_db = None
+                print(f"   ⚠️ REAL_CASSANDRA connection failed: {e}")
+        else:
+            print("   ⚠️ cassandra-driver not available; Cassandra API reads will return empty defaults")
+    else:
+        pipeline_mode = 'LOCAL_FALLBACK'
+        print("🔥 Initializing LOCAL_FALLBACK mode...")
+        kafka_queue, cassandra_db, spark_streamer = get_components()
+        print("   ✅ Kafka simulator ready")
+        print("   ✅ Spark streaming ready")
+        print("   ✅ Cassandra database ready")
+
+    print(f"   Pipeline mode: {pipeline_mode}")
     
     parking_simulator = ParkingSimulator('LOT-MAIN-001')
     parking_simulator.start_simulation(interval=2)
@@ -141,22 +222,27 @@ def health():
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
-        'simulator_running': parking_simulator.running if parking_simulator else False
+        'simulator_running': parking_simulator.running if parking_simulator else False,
+        'pipeline_mode': pipeline_mode,
     })
 
 
 @app.route('/api/parking/status', methods=['GET'])
 def get_parking_status():
     """Get current parking lot status"""
-    if not parking_simulator:
-        return jsonify({'error': 'Simulator not initialized'}), 500
-    
-    lot_data = parking_simulator.get_lot_data()
-    analytics = ml_service.get_analytics(lot_data, historical_data[-20:])
+    lot_data = _get_dashboard_lot_data()
+    analytics = {}
+
+    if ml_service and lot_data:
+        try:
+            analytics = ml_service.get_analytics(lot_data, historical_data[-20:])
+        except Exception:
+            analytics = {}
     
     return jsonify({
         'lot_data': lot_data,
         'analytics': analytics,
+        'source': pipeline_mode,
         'timestamp': datetime.now().isoformat()
     })
 
@@ -233,10 +319,17 @@ def vacate_spot(spot_id):
 @app.route('/api/parking/availability', methods=['GET'])
 def get_availability():
     """Get parking availability prediction"""
-    if not parking_simulator:
-        return jsonify({'error': 'Simulator not initialized'}), 500
-    
-    lot_data = parking_simulator.get_lot_data()
+    lot_data = _get_dashboard_lot_data()
+    if not lot_data:
+        return jsonify({
+            'availability': 'HIGH',
+            'confidence': 0,
+            'occupancy_rate': 0,
+            'recommendation': 'No live data available yet.',
+            'model': 'rule-based-fallback',
+            'timestamp': datetime.now().isoformat()
+        })
+
     availability = ml_service.predict_availability(lot_data)
     
     return jsonify(availability)
@@ -245,10 +338,20 @@ def get_availability():
 @app.route('/api/parking/demand', methods=['GET'])
 def get_demand_prediction():
     """Get parking demand prediction"""
-    if not parking_simulator:
-        return jsonify({'error': 'Simulator not initialized'}), 500
-    
-    lot_data = parking_simulator.get_lot_data()
+    lot_data = _get_dashboard_lot_data()
+    if not lot_data:
+        return jsonify({
+            'time_horizon': 30,
+            'predicted_occupancy_rate': 0,
+            'current_occupancy_rate': 0,
+            'base_demand': 'LOW',
+            'trend': 0,
+            'trend_direction': 'stable',
+            'demand_level': 'LOW',
+            'model': 'rule-based-fallback',
+            'timestamp': datetime.now().isoformat()
+        })
+
     demand = ml_service.predict_demand(lot_data)
     
     return jsonify(demand)
@@ -257,10 +360,10 @@ def get_demand_prediction():
 @app.route('/api/parking/recommendations', methods=['GET'])
 def get_zone_recommendations():
     """Get zone recommendations"""
-    if not parking_simulator:
-        return jsonify({'error': 'Simulator not initialized'}), 500
-    
-    lot_data = parking_simulator.get_lot_data()
+    lot_data = _get_dashboard_lot_data()
+    if not lot_data:
+        return jsonify({'recommended_zone': None, 'alternatives': [], 'timestamp': datetime.now().isoformat()})
+
     recommendations = ml_service.recommend_alternative_zone(lot_data)
     
     return jsonify(recommendations)
@@ -269,10 +372,10 @@ def get_zone_recommendations():
 @app.route('/api/parking/anomalies', methods=['GET'])
 def detect_anomalies():
     """Detect anomalies in parking patterns"""
-    if not parking_simulator:
-        return jsonify({'error': 'Simulator not initialized'}), 500
-    
-    lot_data = parking_simulator.get_lot_data()
+    lot_data = _get_dashboard_lot_data()
+    if not lot_data:
+        return jsonify({'anomaly_detected': 0, 'reason': 'no_data'})
+
     anomalies = ml_service.detect_anomalies(lot_data, historical_data[-50:])
     
     return jsonify(anomalies)
@@ -350,15 +453,21 @@ def get_statistics():
 def get_history():
     """Get occupancy history"""
     limit = request.args.get('limit', 100, type=int)
-    
-    history = []
-    for data in historical_data[-limit:]:
-        history.append({
-            'timestamp': data.get('timestamp'),
-            'occupancy_rate': data.get('occupancy_rate', 0),
-            'occupied_spots': data.get('occupied_spots', 0),
-            'available_spots': data.get('available_spots', 0)
-        })
+
+    if pipeline_mode == 'REAL_CASSANDRA' and cassandra_db and hasattr(cassandra_db, 'get_history'):
+        try:
+            history = cassandra_db.get_history(lot_id='LOT-MAIN-001', limit=limit)
+        except Exception:
+            history = []
+    else:
+        history = []
+        for data in historical_data[-limit:]:
+            history.append({
+                'timestamp': data.get('timestamp'),
+                'occupancy_rate': data.get('occupancy_rate', 0),
+                'occupied_spots': data.get('occupied_spots', 0),
+                'available_spots': data.get('available_spots', 0)
+            })
     
     return jsonify({
         'history': history,
@@ -369,10 +478,7 @@ def get_history():
 @app.route('/api/parking/zones', methods=['GET'])
 def get_zones_info():
     """Get detailed information for all zones"""
-    if not parking_simulator:
-        return jsonify({'error': 'Simulator not initialized'}), 500
-    
-    lot_data = parking_simulator.get_lot_data()
+    lot_data = _get_dashboard_lot_data()
     zone_stats = lot_data.get('zone_statistics', {})
     
     zones = []
@@ -393,17 +499,17 @@ def get_zones_info():
 @app.route('/api/parking/events', methods=['GET'])
 def get_cassandra_events():
     """Get latest parking events from Cassandra"""
-    if not cassandra_db:
-        return jsonify({'error': 'Cassandra not initialized'}), 500
-
     lot_id = request.args.get('lot_id', 'LOT-MAIN-001')
     limit = request.args.get('limit', 20, type=int)
 
     try:
-        events = cassandra_db.query(lot_id=lot_id, limit=limit)
+        if cassandra_db:
+            events = cassandra_db.query(lot_id=lot_id, limit=limit)
+        else:
+            events = []
 
         return jsonify({
-            'source': 'local_cassandra',
+            'source': pipeline_mode,
             'lot_id': lot_id,
             'count': len(events),
             'events': events,
@@ -411,10 +517,7 @@ def get_cassandra_events():
         })
 
     except Exception as e:
-        return jsonify({
-            'error': 'Failed to fetch events from Cassandra',
-            'details': str(e)
-        }), 500
+        return jsonify(_empty_dashboard_payload(source=pipeline_mode))
 
 
 @app.route('/api/parking/performance', methods=['GET'])
@@ -435,15 +538,23 @@ def get_performance():
 @app.route('/api/parking/windows', methods=['GET'])
 def get_windows():
     """Get Spark-style sliding-window aggregations of the event stream."""
-    if not spark_streamer:
-        return jsonify({'error': 'Spark streamer not initialized'}), 500
-
+    lot_id = request.args.get('lot_id', 'LOT-MAIN-001')
     limit = request.args.get('limit', 10, type=int)
-    windows = spark_streamer.get_windows(limit=limit)
+
+    try:
+        if spark_streamer:
+            windows = spark_streamer.get_windows(limit=limit)
+        elif cassandra_db and hasattr(cassandra_db, 'get_latest_window_stats'):
+            windows = cassandra_db.get_latest_window_stats(lot_id=lot_id, limit=limit)
+        else:
+            windows = []
+    except Exception:
+        windows = []
 
     return jsonify({
         'window_count': len(windows),
         'windows': windows,
+        'source': pipeline_mode,
         'timestamp': datetime.now().isoformat()
     })
 
