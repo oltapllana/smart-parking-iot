@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import styled from 'styled-components';
-import { Activity, AlertCircle, TrendingUp, MapPin } from 'lucide-react';
+import { Activity } from 'lucide-react';
 import ParkingOverview from './components/ParkingOverview';
 import ParkingMap from './components/ParkingMap';
 import ZoneStatus from './components/ZoneStatus';
@@ -10,7 +10,6 @@ import AlertPanel from './components/AlertPanel';
 import PredictionPanel from './components/PredictionPanel';
 import TabNavigation from './components/TabNavigation';
 import EventsPanel from './components/EventsPanel';
-import SystemStatus from './components/SystemStatus';
 import PerformancePanel from './components/PerformancePanel';
 
 const AppContainer = styled.div`
@@ -192,7 +191,10 @@ function App() {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState(() => {
+    const tab = new URLSearchParams(window.location.search).get('tab');
+    return tab || 'overview';
+  });
   const [occupancyHistory, setOccupancyHistory] = useState([]);
   const [systemMetrics, setSystemMetrics] = useState({});
   const [performance, setPerformance] = useState(null);
@@ -203,7 +205,7 @@ function App() {
     axios.defaults.headers.common['Cache-Control'] = 'no-store';
     axios.defaults.headers.common['Pragma'] = 'no-cache';
     fetchAllData();
-    const interval = setInterval(fetchAllData, 15000);
+    const interval = setInterval(fetchAllData, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -216,8 +218,8 @@ function App() {
         axios.get('/api/parking/availability'),
         axios.get('/api/parking/history?limit=50'),
         axios.get('/api/parking/events?limit=50'),
-        axios.get('/api/parking/performance'),
-        axios.get('/api/parking/windows?limit=10')
+        axios.get('/api/parking/performance', { validateStatus: () => true }),
+        axios.get('/api/parking/windows?limit=10', { validateStatus: () => true })
       ]);
 
       setParkingData(statusRes.data);
@@ -227,8 +229,8 @@ function App() {
       setPredictions(predictRes.data);
       setOccupancyHistory(historyRes.data.history || []);
       setEvents(eventsRes.data.events || eventsRes.data || []);
-      setPerformance(perfRes.data);
-      setWindows(windowsRes.data.windows || []);
+      setPerformance(perfRes.data || null);
+      setWindows((windowsRes.data && windowsRes.data.windows) || []);
 
       // Render log for verification
       console.log('[FRONTEND RENDER] occupied_spots', statusRes.data?.debug?.occupied_spots, 'available_spots', statusRes.data?.debug?.available_spots, 'occupancy_rate', statusRes.data?.debug?.occupancy_rate);
@@ -236,13 +238,13 @@ function App() {
       // Real pipeline metrics from the performance monitor
       const perf = perfRes.data || {};
       setSystemMetrics({
-        kafka_messages: perf.counters?.kafka_messages || 0,
-        spark_processed: perf.counters?.spark_processed || 0,
-        cassandra_events: perf.counters?.cassandra_events || 0,
-        api_health: perf.health?.data_quality_pct || 100,
-        processing_latency: perf.latency?.end_to_end_ms || 0,
-        throughput: perf.throughput?.spark_eps || 0,
-        latency: perf.latency || {},
+        kafka_messages: 0,
+        spark_processed: perf.total_spark_window_aggregations || 0,
+        cassandra_events: perf.total_cassandra_events || 0,
+        api_health: perf.health_status === 'healthy' ? 100 : 0,
+        processing_latency: perf.api_latency_ms || 0,
+        throughput: 0,
+        latency: perf.api_latency || {},
       });
 
       setLoading(false);
@@ -369,12 +371,6 @@ function App() {
       {activeTab === 'performance' && (
         <FullWidthCard>
           <PerformancePanel performance={performance} windows={windows} />
-        </FullWidthCard>
-      )}
-
-      {activeTab === 'system' && (
-        <FullWidthCard>
-          <SystemStatus systemMetrics={systemMetrics} />
         </FullWidthCard>
       )}
     </AppContainer>

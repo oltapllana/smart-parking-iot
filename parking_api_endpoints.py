@@ -126,6 +126,46 @@ def _build_debug(lot_data=None, endpoint=None, row_count_used=0):
     return debug
 
 
+def _parse_iso_timestamp(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    text = str(value).strip()
+    if text.endswith('Z'):
+        text = text[:-1] + '+00:00'
+    try:
+        parsed = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone().replace(tzinfo=None)
+    return parsed
+
+
+def _age_seconds(value):
+    parsed = _parse_iso_timestamp(value)
+    if not parsed:
+        return None
+    return max(0, round((datetime.now() - parsed).total_seconds(), 1))
+
+
+def _performance_recommendation(status, total_events, total_windows, event_age, window_age):
+    if status == 'error':
+        return 'Check the Cassandra connection and verify the smart_parking keyspace is reachable.'
+    if total_events == 0:
+        return 'No Cassandra events found. Start the simulator and Spark streaming pipeline.'
+    if total_windows == 0:
+        return 'No Spark window aggregations found. Verify the Spark window query is running and writing to Cassandra.'
+    if window_age is None:
+        return 'Window freshness is unknown. Verify Spark writes window_start/window_end timestamps.'
+    if status == 'stale':
+        return 'Data is stale. Restart or inspect the simulator, Kafka, and Spark streaming job.'
+    if event_age is not None and window_age is not None and window_age > event_age + 120:
+        return 'Spark windows are lagging behind raw events. Check Spark processing latency and Cassandra writes.'
+    return 'Pipeline is current. Continue monitoring API latency and Spark window throughput.'
+
+
 def _get_dashboard_lot_data(lot_id='LOT-MAIN-001'):
     if pipeline_mode == 'REAL_CASSANDRA' and cassandra_db and hasattr(cassandra_db, 'get_latest_status_snapshot'):
         try:
@@ -771,45 +811,95 @@ def get_cassandra_events():
 
 @app.route('/api/parking/performance', methods=['GET'])
 def get_performance():
-    """Get real-time pipeline performance metrics (throughput, latency)."""
-    snap = get_monitor().snapshot()
+    """Get live Cassandra-backed performance and freshness metrics."""
+    lot_id = request.args.get('lot_id', 'LOT-MAIN-001')
+    freshness_threshold = request.args.get('freshness_threshold', 300, type=int)
+    monitor_snapshot = get_monitor().snapshot()
+    api_latency_stats = (monitor_snapshot.get('latency') or {}).get('api_response') or {}
+    request_latency_ms = round((time.time() - getattr(g, '_start_time', time.time())) * 1000.0, 2)
 
-    # If running in REAL_CASSANDRA, populate simple counters from Cassandra
-    source_details = ['LOCAL_MONITOR']
-    if pipeline_mode == 'REAL_CASSANDRA' and cassandra_db:
-        try:
-            cass_events = cassandra_db.count_events()
-            cass_windows = cassandra_db.count_window_stats()
-            snap['cassandra_events'] = cass_events
-            snap['cassandra_window_count'] = cass_windows
-            # Provide a non-zero indication for throughput summary
-            snap['throughput']['cassandra_events'] = cass_events
-            # If spark throughput is zero (no local monitor from Spark), derive a simple estimate
-            try:
-                if not snap['throughput'].get('spark_eps'):
-                    uptime = snap.get('uptime_seconds') or 1
-                    snap['throughput']['spark_eps'] = round(cass_events / max(1, uptime), 3)
-            except Exception:
-                pass
-            source_details.append('REAL_CASSANDRA')
-        except Exception as e:
-            print(f"⚠️ /api/parking/performance cassandra counts failed: {e}")
+    if pipeline_mode != 'REAL_CASSANDRA' or not cassandra_db:
+        payload = {
+            'source': pipeline_mode,
+            'lot_id': lot_id,
+            'total_cassandra_events': 0,
+            'total_spark_window_aggregations': 0,
+            'latest_event_timestamp': None,
+            'latest_window_timestamp': None,
+            'data_freshness_seconds': None,
+            'api_latency_ms': request_latency_ms,
+            'api_latency': api_latency_stats,
+            'health_status': 'error',
+            'optimization_recommendation': 'Start the API with USE_REAL_CASSANDRA=true and verify Cassandra is reachable.',
+            'debug': _build_debug(lot_data=None, endpoint='/api/parking/performance', row_count_used=0),
+            'timestamp': datetime.now().isoformat(),
+        }
+        return jsonify(payload), 503
+
+    try:
+        total_events = cassandra_db.count_events(lot_id=lot_id)
+        total_windows = cassandra_db.count_window_stats(lot_id=lot_id)
+        latest_event_ts = cassandra_db.get_latest_event_timestamp(lot_id=lot_id)
+        latest_window_ts = cassandra_db.get_latest_window_timestamp(lot_id=lot_id)
+    except Exception as e:
+        print(f"Warning: /api/parking/performance cassandra query failed: {e}")
+        payload = {
+            'source': pipeline_mode,
+            'lot_id': lot_id,
+            'total_cassandra_events': 0,
+            'total_spark_window_aggregations': 0,
+            'latest_event_timestamp': None,
+            'latest_window_timestamp': None,
+            'data_freshness_seconds': None,
+            'api_latency_ms': request_latency_ms,
+            'api_latency': api_latency_stats,
+            'health_status': 'error',
+            'optimization_recommendation': _performance_recommendation('error', 0, 0, None, None),
+            'error': str(e),
+            'debug': _build_debug(lot_data=None, endpoint='/api/parking/performance', row_count_used=0),
+            'timestamp': datetime.now().isoformat(),
+        }
+        return jsonify(payload), 500
+
+    event_age = _age_seconds(latest_event_ts)
+    window_age = _age_seconds(latest_window_ts)
+    freshness_candidates = [age for age in (event_age, window_age) if age is not None]
+    data_freshness_seconds = min(freshness_candidates) if freshness_candidates else None
+
+    if total_events <= 0 or total_windows <= 0 or data_freshness_seconds is None:
+        health_status = 'stale'
+    elif event_age is not None and event_age > freshness_threshold:
+        health_status = 'stale'
+    elif window_age is not None and window_age > freshness_threshold:
+        health_status = 'stale'
     else:
-        if pipeline_mode != 'REAL_CASSANDRA':
-            source_details.append('LOCAL_PIPELINE')
+        health_status = 'healthy'
 
-    # Augment with live pipeline stats if available (local mode)
-    if spark_streamer:
-        try:
-            snap['pipeline_stats'] = spark_streamer.get_stats()
-            source_details.append('SPARK_STREAMER')
-        except Exception as e:
-            print(f"⚠️ spark_streamer.get_stats failed: {e}")
-
-    snap['source_details'] = source_details
-    debug = _build_debug(lot_data=None, endpoint='/api/parking/performance', row_count_used=(snap.get('cassandra_events') or 0))
-    snap['debug'] = debug
-    return jsonify(snap)
+    payload = {
+        'source': pipeline_mode,
+        'lot_id': lot_id,
+        'total_cassandra_events': total_events,
+        'total_spark_window_aggregations': total_windows,
+        'latest_event_timestamp': latest_event_ts,
+        'latest_window_timestamp': latest_window_ts,
+        'latest_event_freshness_seconds': event_age,
+        'latest_window_freshness_seconds': window_age,
+        'data_freshness_seconds': data_freshness_seconds,
+        'freshness_threshold_seconds': freshness_threshold,
+        'api_latency_ms': request_latency_ms,
+        'api_latency': api_latency_stats,
+        'health_status': health_status,
+        'optimization_recommendation': _performance_recommendation(
+            health_status,
+            total_events,
+            total_windows,
+            event_age,
+            window_age,
+        ),
+        'debug': _build_debug(lot_data=None, endpoint='/api/parking/performance', row_count_used=total_events),
+        'timestamp': datetime.now().isoformat(),
+    }
+    return jsonify(payload)
 
 
 @app.route('/api/parking/windows', methods=['GET'])
@@ -817,14 +907,19 @@ def get_windows():
     """Get Spark-style sliding-window aggregations of the event stream."""
     lot_id = request.args.get('lot_id', 'LOT-MAIN-001')
     limit = request.args.get('limit', 10, type=int)
+    recent_seconds = request.args.get('recent_seconds', 300, type=int)
 
     if pipeline_mode == 'REAL_CASSANDRA':
         if not cassandra_db:
             return jsonify({'error': 'REAL_CASSANDRA requested but Cassandra client not initialized'}), 500
         try:
-            windows = cassandra_db.get_latest_window_stats(lot_id=lot_id, limit=limit)
+            windows = cassandra_db.get_recent_window_stats(
+                lot_id=lot_id,
+                limit=limit,
+                recent_seconds=recent_seconds,
+            )
         except Exception as e:
-            print(f"⚠️ /api/parking/windows cassandra query failed: {e}")
+            print(f"?? /api/parking/windows cassandra query failed: {e}")
             return jsonify({'error': 'Failed to fetch windows from Cassandra', 'details': str(e)}), 500
     else:
         try:
@@ -833,7 +928,7 @@ def get_windows():
             else:
                 windows = []
         except Exception as e:
-            print(f"⚠️ /api/parking/windows local fetch failed: {e}")
+            print(f"?? /api/parking/windows local fetch failed: {e}")
             windows = []
 
     debug = _build_debug(lot_data=None, endpoint='/api/parking/windows', row_count_used=len(windows))
@@ -841,6 +936,7 @@ def get_windows():
         'window_count': len(windows),
         'windows': windows,
         'source': pipeline_mode,
+        'recent_seconds': recent_seconds,
         'debug': debug,
         'timestamp': datetime.now().isoformat()
     })

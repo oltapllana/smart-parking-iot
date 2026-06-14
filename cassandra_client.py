@@ -1,5 +1,5 @@
 from importlib import import_module
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def _load_cassandra_driver():
@@ -31,6 +31,34 @@ class CassandraClient:
             self.session.row_factory = dict_factory
         print("✅ Connected to Cassandra")
 
+    def _row_to_dict(self, row):
+        if isinstance(row, dict):
+            return row
+        try:
+            return dict(row._asdict())
+        except Exception:
+            try:
+                return dict(row)
+            except Exception:
+                return {k: str(v) for k, v in getattr(row, '__dict__', {}).items()}
+
+    def _parse_timestamp(self, value):
+        if not value:
+            return None
+        if isinstance(value, datetime):
+            dt = value
+        else:
+            text = str(value).strip()
+            if text.endswith('Z'):
+                text = text[:-1] + '+00:00'
+            try:
+                dt = datetime.fromisoformat(text)
+            except Exception:
+                return None
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+
     def get_latest_events(self, lot_id="LOT-001", limit=20):
         if not lot_id or not self.session:
             return []
@@ -46,20 +74,17 @@ class CassandraClient:
             rows = list(self.session.execute(query, (lot_id, limit)))
             result = []
             for r in rows:
-                if isinstance(r, dict):
-                    result.append(r)
-                else:
-                    try:
-                        result.append(dict(r._asdict()))
-                    except Exception:
-                        try:
-                            result.append(dict(r))
-                        except Exception:
-                            result.append({k: str(v) for k, v in getattr(r, '__dict__', {}).items()})
+                result.append(self._row_to_dict(r))
             return result
         except Exception as e:
             print(f"⚠️ Cassandra query failed: {e}")
             raise
+
+    def get_latest_event_timestamp(self, lot_id="LOT-MAIN-001"):
+        rows = self.get_latest_events(lot_id=lot_id, limit=1)
+        if not rows:
+            return None
+        return rows[0].get('event_timestamp') or rows[0].get('timestamp')
 
     def get_latest_window_stats(self, lot_id="LOT-MAIN-001", limit=10):
         if not lot_id or not self.session:
@@ -76,20 +101,34 @@ class CassandraClient:
             rows = list(self.session.execute(query, (lot_id, limit)))
             result = []
             for r in rows:
-                if isinstance(r, dict):
-                    result.append(r)
-                else:
-                    try:
-                        result.append(dict(r._asdict()))
-                    except Exception:
-                        try:
-                            result.append(dict(r))
-                        except Exception:
-                            result.append({k: str(v) for k, v in getattr(r, '__dict__', {}).items()})
+                result.append(self._row_to_dict(r))
             return result
         except Exception as e:
             print(f"⚠️ Cassandra window query failed: {e}")
             raise
+
+    def get_latest_window_timestamp(self, lot_id="LOT-MAIN-001"):
+        rows = self.get_latest_window_stats(lot_id=lot_id, limit=1)
+        if not rows:
+            return None
+        return rows[0].get('window_end') or rows[0].get('window_start')
+
+    def get_recent_window_stats(self, lot_id="LOT-MAIN-001", limit=10, recent_seconds=300):
+        rows = self.get_latest_window_stats(lot_id=lot_id, limit=max(limit * 3, limit))
+        if recent_seconds is None:
+            return rows[:limit]
+
+        now = datetime.utcnow()
+        recent = []
+        for row in rows:
+            ts = self._parse_timestamp(row.get('window_end') or row.get('window_start'))
+            if ts is None:
+                continue
+            if (now - ts).total_seconds() <= recent_seconds:
+                recent.append(row)
+            if len(recent) >= limit:
+                break
+        return recent
 
     def get_latest_status_snapshot(self, lot_id="LOT-MAIN-001", total_spots=360, limit=50):
         # Build top-level snapshot and per-zone aggregates from recent events
@@ -224,7 +263,7 @@ class CassandraClient:
             return 0
         try:
             q = "SELECT count(*) FROM parking_events WHERE lot_id = %s"
-            row = self.session.execute(q, (lot_id,)).one()
+            row = self.session.execute(q, (lot_id,), timeout=30).one()
             if not row:
                 return 0
             # dict_factory returns a dict like {'count': X}
@@ -255,7 +294,7 @@ class CassandraClient:
             return 0
         try:
             q = "SELECT count(*) FROM parking_window_stats WHERE lot_id = %s"
-            row = self.session.execute(q, (lot_id,)).one()
+            row = self.session.execute(q, (lot_id,), timeout=30).one()
             if not row:
                 return 0
             if isinstance(row, dict):
