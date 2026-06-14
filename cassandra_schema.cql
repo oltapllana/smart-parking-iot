@@ -28,11 +28,13 @@ CREATE TABLE IF NOT EXISTS parking_events (
 -- Windowed aggregations produced by the Spark Streaming job
 -- (event volume + entries/exits per 1-minute window).
 CREATE TABLE IF NOT EXISTS parking_window_stats (
-    lot_id          text,
-    window_start    text,
-    window_end      text,
-    event_count     bigint,
-    entries         bigint,
-    exits           bigint,
-    PRIMARY KEY ((lot_id), window_start)
+lot_id text,
+window_start text,
+window_end text,
+event_count bigint,
+entries bigint,
+exits bigint,
+avg_occupancy_duration double,
+processed_timestamp text,
+PRIMARY KEY ((lot_id), window_start)
 ) WITH CLUSTERING ORDER BY (window_start DESC);

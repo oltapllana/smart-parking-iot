@@ -2,7 +2,7 @@
   "trained": true,
   "algorithm": "RandomForest",
   "classifier_accuracy": 0.9,
-  "regressor_mae": 2.5422,
+  "regressor_mae": 2.5419,
   "training_samples": 4000,
   "features": [
     "occupancy_rate",
@@ -13,7 +13,7 @@
     "weather",
     "special_event"
   ],
-  "trained_at": "2026-06-01T13:06:24.828488",
+  "trained_at": "2026-06-14T00:10:31.929670",
   "real_samples": 0,
   "data_source": "synthetic"
 }

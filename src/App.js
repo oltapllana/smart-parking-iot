@@ -199,6 +199,9 @@ function App() {
   const [windows, setWindows] = useState([]);
 
   useEffect(() => {
+    // Disable caching for API calls and enable debug logging
+    axios.defaults.headers.common['Cache-Control'] = 'no-store';
+    axios.defaults.headers.common['Pragma'] = 'no-cache';
     fetchAllData();
     const interval = setInterval(fetchAllData, 15000);
     return () => clearInterval(interval);
@@ -218,12 +221,17 @@ function App() {
       ]);
 
       setParkingData(statusRes.data);
+      console.log('[FRONTEND FETCH] /api/parking/status', { fetched_at: new Date().toISOString(), latest_event_timestamp: statusRes.data?.debug?.latest_event_timestamp, occupied_spots: statusRes.data?.debug?.occupied_spots, occupancy_rate: statusRes.data?.debug?.occupancy_rate });
+      console.log('[FRONTEND STATUS]', 'occupied_spots', statusRes.data?.lot_data?.occupied_spots, 'available_spots', statusRes.data?.lot_data?.available_spots, 'occupancy_rate', statusRes.data?.lot_data?.occupancy_rate);
       setAlerts(alertsRes.data.alerts || []);
       setPredictions(predictRes.data);
       setOccupancyHistory(historyRes.data.history || []);
       setEvents(eventsRes.data.events || eventsRes.data || []);
       setPerformance(perfRes.data);
       setWindows(windowsRes.data.windows || []);
+
+      // Render log for verification
+      console.log('[FRONTEND RENDER] occupied_spots', statusRes.data?.debug?.occupied_spots, 'available_spots', statusRes.data?.debug?.available_spots, 'occupancy_rate', statusRes.data?.debug?.occupancy_rate);
 
       // Real pipeline metrics from the performance monitor
       const perf = perfRes.data || {};

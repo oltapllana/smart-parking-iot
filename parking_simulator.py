@@ -70,6 +70,20 @@ class ParkingLot:
         # Demo traffic model: occupancy sweeps a full low->high->low cycle
         # over `demo_cycle_seconds` so the dashboard shows varied predictions
         # and the alert engine actually fires during a live demo.
+        # Allow slower demo mode via environment vars to make debugging easier
+        try:
+            import os
+            demo_slow = os.getenv('DEMO_SLOW_MODE', '').strip().lower() in {'1', 'true', 'yes', 'on'}
+            if demo_slow:
+                # Respect explicit interval override
+                demo_cycle_seconds = int(os.getenv('DEMO_EVENT_INTERVAL_SECONDS', demo_cycle_seconds))
+                # Limit maximum step to keep occupancy changes small
+                self._demo_occupancy_change_limit = int(os.getenv('DEMO_OCCUPANCY_CHANGE_LIMIT', 1))
+            else:
+                self._demo_occupancy_change_limit = max(1, int(self.total_spots // 40))
+        except Exception:
+            self._demo_occupancy_change_limit = max(1, int(self.total_spots // 40))
+
         self.demo_cycle_seconds = demo_cycle_seconds
         self._sim_start = time.time()
 
@@ -121,7 +135,7 @@ class ParkingLot:
     def get_spots_by_zone(self, zone):
         """Get all spots in a zone"""
         return [s for s in self.spots.values() if s.zone == zone]
-
+    # when an car enters to a parking spot, this creates an event and sends to Kafka
     def occupy_spot(self, spot_id, vehicle_type='car'):
         """Occupy a parking spot"""
         if spot_id in self.spots and not self.spots[spot_id].occupied:
@@ -144,7 +158,7 @@ class ParkingLot:
 
             return True
         return False
-
+    # when an car exits from a parking spot, this creates an event and sends to Kafka
     def vacate_spot(self, spot_id):
         """Vacate a parking spot"""
         if spot_id in self.spots and self.spots[spot_id].occupied:
@@ -240,7 +254,8 @@ class ParkingLot:
         diff = target - current
 
         # Gradual convergence so entries/exits stream realistically
-        max_step = max(1, self.total_spots // 40)  # up to ~9 spots/tick
+        # Control how many spots may change per tick; in slow demo mode this will be small
+        max_step = getattr(self, '_demo_occupancy_change_limit', max(1, self.total_spots // 40))
 
         if diff > 0:
             for _ in range(min(diff, max_step)):
@@ -264,12 +279,13 @@ class ParkingLot:
         return [s.get_status() for s in self.spots.values()]
 
 class ParkingSimulator:
+    # Prepare simulator
     def __init__(self, lot_id='PARKING-001', kafka_enabled=False):
         self.parking_lot = ParkingLot(lot_id, kafka_enabled=kafka_enabled)
         self.running = False
         self.simulation_thread = None
         self.iteration_count = 0
-        
+    # start running
     def start_simulation(self, interval=1):
         """Start parking lot simulation"""
         self.running = True
@@ -280,27 +296,27 @@ class ParkingSimulator:
         )
         self.simulation_thread.start()
         print(f"✅ Parking simulator started for {self.parking_lot.lot_id}")
-        
+    # stop running  
     def stop_simulation(self):
         """Stop parking lot simulation"""
         self.running = False
         if self.simulation_thread:
             self.simulation_thread.join(timeout=5)
         print("⛔ Parking simulator stopped")
-        
+    # repeat traffic changes 
     def _simulation_loop(self, interval):
         """Main simulation loop"""
         while self.running:
             self.parking_lot.simulate_traffic()
             self.iteration_count += 1
             time.sleep(interval)
-    
+    # get full parking summary
     def get_lot_data(self):
         """Get current parking lot data"""
         stats = self.parking_lot.get_statistics()
         stats['iteration'] = self.iteration_count
         return stats
-    
+    # get one parking spot info
     def get_spot_details(self, spot_id):
         """Get details of a specific parking spot"""
         if spot_id in self.parking_lot.spots:
@@ -310,6 +326,7 @@ class ParkingSimulator:
 
 # Example usage
 if __name__ == '__main__':
+    # create simulator for 'LOT-001' with Kafka enabled, run every 0.5s
     simulator = ParkingSimulator('LOT-001', kafka_enabled=True)
     simulator.start_simulation(interval=0.5)
     

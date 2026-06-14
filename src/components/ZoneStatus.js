@@ -90,6 +90,16 @@ const ZoneStatus = ({ zones }) => {
     'Occupied': zone.occupied
   }));
 
+  // Log zone sums vs overview for debugging
+  try {
+    const sumOccupied = zoneData.reduce((s, z) => s + (z.occupied || 0), 0);
+    const sumAvailable = zoneData.reduce((s, z) => s + (z.available || 0), 0);
+    const perZone = zoneData.map(z => `${z.name}:${z.occupied}`).join(', ');
+    console.log('[FRONTEND ZONES RENDER]', perZone, 'occupied_sum', sumOccupied);
+  } catch (e) {
+    // ignore logging errors
+  }
+
   return (
     <Container>
       <h2>🚗 Zone Status</h2>
