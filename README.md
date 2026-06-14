@@ -1,85 +1,85 @@
-# 🅿️ Smart Parking IoT System
+# Smart Parking IoT System
 
 A comprehensive real-time IoT system for smart parking lot management with **ML-powered predictions**, **real-time monitoring**, and an **interactive React dashboard**.
 
-> **Pipeline:** Sensors → **Apache Kafka** → **Apache Spark Streaming** (sliding-window aggregations) → **Apache Cassandra** → Flask API → React Dashboard.
+> **Pipeline:** Sensors  **Apache Kafka**  **Apache Spark Streaming** (sliding-window aggregations)  **Apache Cassandra**  Flask API  React Dashboard.
 >
 > **Two run modes:**
-> - **Local pipeline** (default, in `local_pipeline.py`) — Kafka/Spark/Cassandra simulated in-process. No Docker needed; ideal for a live demo.
-> - **Real Docker pipeline** — actual Apache Kafka + Spark + Cassandra via `docker-compose.yml`. See **[DOCKER_PIPELINE.md](DOCKER_PIPELINE.md)**.
+> - **Local pipeline** (default, in `local_pipeline.py`)  Kafka/Spark/Cassandra simulated in-process. No Docker needed; ideal for a live demo.
+> - **Real Docker pipeline**  actual Apache Kafka + Spark + Cassandra via `docker-compose.yml`. See **[DOCKER_PIPELINE.md](DOCKER_PIPELINE.md)**.
 >
-> **Advanced components:** 🤖 trained ML models (`parking_ml_service.py`), 🚨 alarm system (`parking_alert_engine.py`), 📊 performance analysis (`performance_monitor.py` + `benchmark.py`). Full write-up in **[REPORT.md](REPORT.md)**.
+> **Advanced components:**  trained ML models (`parking_ml_service.py`),  alarm system (`parking_alert_engine.py`),  performance analysis (`performance_monitor.py` + `benchmark.py`). Full write-up in **[REPORT.md](REPORT.md)**.
 
-## 🏗️ Architecture
+## Architecture
 
 ```
-🚗 Simulated Parking Sensors (4 Zones × 3 Levels × 30 Spots = 360 total)
-   ↓
-🔄 Real-time Parking Simulator
-   • Vehicle entry/exit simulation
-   • Dynamic occupancy patterns
-   • Zone-based management
-   ↓
-⚡ Python Backend (Flask API)
-   • Real-time data endpoints
-   • REST API for parking management
-   • Historical data tracking
-   ↓
-🤖 ML Analytics Engine
-   • Availability predictions
-   • Demand forecasting
-   • Anomaly detection
-   • Zone recommendations
-   ↓
-🚨 Alert Engine
-   • Real-time threshold monitoring
-   • Multi-level alerts (Info, Warning, Critical)
-   • Zone occupancy alerts
-   • Demand spike detection
-   ↓
-⚛️ React Dashboard
-   • Real-time visualization
-   • Interactive zone status
-   • Occupancy trends
-   • Alert management
+ Simulated Parking Sensors (4 Zones  3 Levels  30 Spots = 360 total)
+
+ Real-time Parking Simulator
+    Vehicle entry/exit simulation
+    Dynamic occupancy patterns
+    Zone-based management
+
+ Python Backend (Flask API)
+    Real-time data endpoints
+    REST API for parking management
+    Historical data tracking
+
+ ML Analytics Engine
+    Availability predictions
+    Demand forecasting
+    Anomaly detection
+    Zone recommendations
+
+ Alert Engine
+    Real-time threshold monitoring
+    Multi-level alerts (Info, Warning, Critical)
+    Zone occupancy alerts
+    Demand spike detection
+
+ React Dashboard
+    Real-time visualization
+    Interactive zone status
+    Occupancy trends
+    Alert management
 ```
 
-## ✨ Features
+## Features
 
-### 🔄 Real-Time Monitoring
+### Real-Time Monitoring
 - **Live Occupancy Tracking**: Sub-second updates on parking spot status
 - **Zone Management**: Individual tracking for 4 parking zones
 - **Dynamic Patterns**: Realistic vehicle arrival/departure simulation
 - **Spot Details**: Individual spot status with occupancy duration
 
-### 🤖 ML-Powered Intelligence
+### ML-Powered Intelligence
 - **Availability Prediction**: HIGH, MEDIUM, LOW, FULL classifications
 - **Demand Forecasting**: 30-minute occupancy predictions
 - **Anomaly Detection**: Unusual parking patterns identification
 - **Zone Recommendations**: Suggest alternative zones when full
 - **Confidence Scoring**: ML prediction confidence levels (0-100%)
 
-### 📊 Interactive Dashboard
+### Interactive Dashboard
 - **Overview Tab**: Quick statistics and predictions
 - **Zones Tab**: Detailed zone occupancy with visual breakdown
 - **Trends Tab**: Historical occupancy charts and analytics
 - **Alerts Tab**: Real-time alert management and history
 - **Responsive Design**: Works on desktop and tablet
 
-### 🚨 Intelligent Alert System
+### Intelligent Alert System
 - **Occupancy Alerts**: Warning at 75%, Critical at 90%
 - **Zone Capacity Alerts**: Alert when specific zones fill up
 - **Demand Spike Detection**: Automatic detection of traffic surges
 - **Alert History**: Track all generated alerts
 - **Severity Levels**: Info, Warning, Critical classifications
 
-### 🎛️ Advanced Analytics
+### Advanced Analytics
 - **Statistical Analysis**: Real-time occupancy statistics
 - **Historical Data**: 1000+ data points tracking
 - **Trend Analysis**: Occupancy trends over time
 - **Peak Hour Identification**: Automatic busy period detection
 
-## 📋 Prerequisites
+## Prerequisites
 
 ### Windows System Requirements
 - **Python 3.8+** (or 3.11+ for best compatibility)
@@ -88,7 +88,7 @@ A comprehensive real-time IoT system for smart parking lot management with **ML-
 - **npm** (Node package manager)
 - **4GB RAM** minimum
 
-## 🔐 Environment Variables
+## Environment Variables
 
 Twilio credentials can be stored in a local `.env` file in the project root. The app loads it automatically when present.
 
@@ -133,7 +133,7 @@ If the API runs inside Docker, use `CASSANDRA_HOST=cassandra` instead. Leave `US
    npm --version
    ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Step 1: Setup (One-time only)
 
@@ -159,9 +159,9 @@ python parking_api_endpoints.py
 ```
 You should see:
 ```
-✅ All parking services initialized
-🚀 Starting Smart Parking API Server
-📍 Server running on http://localhost:5000
+ All parking services initialized
+ Starting Smart Parking API Server
+ Server running on http://localhost:5000
 ```
 
 Terminal 2 - Start React Dashboard:
@@ -176,7 +176,7 @@ The dashboard will open automatically at http://localhost:3000
 - **API Documentation**: http://localhost:5000
 - **API Health Check**: http://localhost:5000/api/health
 
-## 📡 API Endpoints
+## API Endpoints
 
 ### Health & Status
 - `GET /api/health` - System health check
@@ -200,16 +200,16 @@ The dashboard will open automatically at http://localhost:3000
 ### Alerts & History
 - `GET /api/parking/alerts` - Current active alerts
 - `GET /api/parking/statistics` - Parking statistics
-- `GET /api/parking/history?limit=100` - Occupancy history
+- `GET /api/parking/history|limit=100` - Occupancy history
 
 ### Advanced Components
 - `GET /api/parking/performance` - Live pipeline throughput & latency metrics
-- `GET /api/parking/windows?limit=10` - Spark sliding-window aggregations
+- `GET /api/parking/windows|limit=10` - Spark sliding-window aggregations
 - `GET /api/parking/ml-info` - Trained ML model metadata & feature importances
 - `POST /api/parking/retrain` - Retrain the ML models on fresh synthetic data
-- `GET /api/parking/events?limit=20` - Latest events stored in Cassandra
+- `GET /api/parking/events|limit=20` - Latest events stored in Cassandra
 
-## 🧪 Docker Verification Checklist
+## Docker Verification Checklist
 
 Use these commands to prove the real pipeline end to end:
 
@@ -225,13 +225,13 @@ docker exec -it smartparking-cassandra cqlsh -e "SELECT count(*) FROM smart_park
 To prove the API is reading real Cassandra, start it with `USE_REAL_CASSANDRA=true` and then call:
 
 ```powershell
-Invoke-RestMethod http://localhost:5000/api/parking/events?limit=5
-Invoke-RestMethod http://localhost:5000/api/parking/windows?limit=5
+Invoke-RestMethod http://localhost:5000/api/parking/events|limit=5
+Invoke-RestMethod http://localhost:5000/api/parking/windows|limit=5
 ```
 
 The React dashboard uses the API, so once the API is in `REAL_CASSANDRA` mode the dashboard will render real Cassandra-backed data instead of the SQLite fallback.
 
-## 🎮 Dashboard Guide
+## Dashboard Guide
 
 ### Overview Tab
 - **Quick Stats**: Total, occupied, and available spots
@@ -251,13 +251,13 @@ The React dashboard uses the API, so once the API is in `REAL_CASSANDRA` mode th
 
 ### Alerts Tab
 - **Active Alerts**: Current system alerts with severity levels
-- **Alert Types**: 
-  - 🔴 **Critical**: Lot nearly full (90%+)
-  - 🟡 **Warning**: Moderate alerts (75-90%) or zone full alerts
-  - 🔵 **Info**: Informational alerts and demand spikes
+- **Alert Types**:
+  - **Critical**: Lot nearly full (90%+)
+  - **Warning**: Moderate alerts (75-90%) or zone full alerts
+  - **Info**: Informational alerts and demand spikes
 - **Timestamps**: Know when each alert was generated
 
-## 🤖 ML Models
+## ML Models
 
 ### Availability Classifier
 - **Inputs**: Current occupancy, time of day, day of week, historical trend
@@ -271,10 +271,10 @@ The React dashboard uses the API, so once the API is in `REAL_CASSANDRA` mode th
 
 ### Anomaly Detector
 - **Detection Method**: Z-score based on historical data
-- **Triggers**: When occupancy deviates >2.5σ from average
+- **Triggers**: When occupancy deviates >2.5 from average
 - **Severity**: Low, Medium, High based on deviation
 
-## 📊 Data Collection
+## Data Collection
 
 The system automatically collects data every 5 seconds:
 - Occupancy rate
@@ -285,36 +285,36 @@ The system automatically collects data every 5 seconds:
 
 Data is kept for the last 1000 data points (approximately 1.4 hours).
 
-## 🛠️ Project Structure
+## Project Structure
 
 ```
 smart_parking_iot/
-├── parking_simulator.py          # IoT sensor simulation
-├── parking_ml_service.py         # ML predictions & analytics
-├── parking_api_endpoints.py      # Flask API server
-├── parking_alert_engine.py       # Alert management
-├── package.json                  # React dependencies
-├── requirements.txt              # Python dependencies
-├── setup.bat                     # One-time setup
-├── start_api.bat                 # Start API server
-├── start_dashboard.bat           # Start React dashboard
-├── src/
-│   ├── App.js                   # Main React app
-│   ├── index.js                 # React entry point
-│   ├── index.css                # Global styles
-│   └── components/
-│       ├── ParkingOverview.js   # Overview statistics
-│       ├── ZoneStatus.js        # Zone information
-│       ├── OccupancyChart.js    # Trend charts
-│       ├── AlertPanel.js        # Alert management
-│       ├── PredictionPanel.js   # ML predictions
-│       └── TabNavigation.js     # Tab navigation
-├── public/
-│   └── index.html               # HTML template
-└── README.md                     # This file
+ parking_simulator.py          # IoT sensor simulation
+ parking_ml_service.py         # ML predictions & analytics
+ parking_api_endpoints.py      # Flask API server
+ parking_alert_engine.py       # Alert management
+ package.json                  # React dependencies
+ requirements.txt              # Python dependencies
+ setup.bat                     # One-time setup
+ start_api.bat                 # Start API server
+ start_dashboard.bat           # Start React dashboard
+ src/
+    App.js                   # Main React app
+    index.js                 # React entry point
+    index.css                # Global styles
+    components/
+        ParkingOverview.js   # Overview statistics
+        ZoneStatus.js        # Zone information
+        OccupancyChart.js    # Trend charts
+        AlertPanel.js        # Alert management
+        PredictionPanel.js   # ML predictions
+        TabNavigation.js     # Tab navigation
+ public/
+    index.html               # HTML template
+ README.md                     # This file
 ```
 
-## 🔧 Configuration
+## Configuration
 
 ### Alert Thresholds (parking_alert_engine.py)
 - **Warning Threshold**: 75% occupancy
@@ -336,7 +336,7 @@ Modify in `parking_simulator.py`:
 parking_lot = ParkingLot('LOT-MAIN-001', zones=4, levels=3, spots_per_level=30)
 ```
 
-## 📈 Example Use Cases
+## Example Use Cases
 
 1. **Real-time Occupancy Monitoring**
    - Track parking availability in real-time
@@ -358,7 +358,7 @@ parking_lot = ParkingLot('LOT-MAIN-001', zones=4, levels=3, spots_per_level=30)
    - Analyze peak hours
    - Optimize staffing and maintenance schedules
 
-## 🚨 Troubleshooting
+## Troubleshooting
 
 ### Port Already in Use
 If port 5000 or 3000 is already in use:
@@ -379,7 +379,7 @@ If port 5000 or 3000 is already in use:
 - Run: `pip install --upgrade pip`
 - Run: `pip install -r requirements.txt`
 
-## 📝 Customization
+## Customization
 
 ### Add Custom Alerts
 Edit `parking_alert_engine.py` to add new alert types:
@@ -394,7 +394,7 @@ Edit React components in `src/components/` to customize the UI.
 ### Change Simulation Parameters
 Edit `parking_simulator.py` to adjust traffic patterns.
 
-## 📦 Dependencies
+## Dependencies
 
 ### Python
 - Flask 2.3.2 - Web framework
@@ -409,7 +409,7 @@ Edit `parking_simulator.py` to adjust traffic patterns.
 - recharts 2.10.0 - Charting library
 - styled-components 6.0.7 - Styling
 
-## 🎯 Performance
+## Performance
 
 - **API Response Time**: <100ms for most endpoints
 - **Dashboard Update Rate**: Every 5 seconds
@@ -417,11 +417,11 @@ Edit `parking_simulator.py` to adjust traffic patterns.
 - **Historical Data**: Last 1000 samples (~1.4 hours)
 - **Concurrent Users**: Tested with 50+ simultaneous connections
 
-## 📄 License
+## License
 
 This project is open source and available for educational and commercial use.
 
-## 🤝 Support
+## Support
 
 For issues or questions:
 1. Check the troubleshooting section
@@ -429,7 +429,7 @@ For issues or questions:
 3. Check console logs for error messages
 4. Ensure all prerequisites are installed
 
-## 🚀 Future Enhancements
+## Future Enhancements
 
 - Mobile app integration
 - SMS/Email notifications
@@ -442,5 +442,3 @@ For issues or questions:
 - EV charging spot tracking
 
 ---
-
-**Happy Parking! 🅿️**
